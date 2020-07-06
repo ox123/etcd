@@ -20,12 +20,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/etcd/etcdserver/api/etcdhttp"
-	"github.com/coreos/etcd/etcdserver/api/v2http/httptypes"
-	"github.com/coreos/etcd/etcdserver/v2auth"
-	"github.com/coreos/etcd/pkg/logutil"
+	"go.etcd.io/etcd/v3/etcdserver/api/etcdhttp"
+	"go.etcd.io/etcd/v3/etcdserver/api/v2auth"
+	"go.etcd.io/etcd/v3/etcdserver/api/v2http/httptypes"
 
-	"github.com/coreos/pkg/capnslog"
+	"go.uber.org/zap"
 )
 
 const (
@@ -33,23 +32,25 @@ const (
 	defaultWatchTimeout = time.Duration(math.MaxInt64)
 )
 
-var (
-	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "etcdserver/api/v2http")
-	mlog = logutil.NewMergeLogger(plog)
-)
-
-func writeError(w http.ResponseWriter, r *http.Request, err error) {
+func writeError(lg *zap.Logger, w http.ResponseWriter, r *http.Request, err error) {
 	if err == nil {
 		return
 	}
 	if e, ok := err.(v2auth.Error); ok {
 		herr := httptypes.NewHTTPError(e.HTTPStatus(), e.Error())
 		if et := herr.WriteTo(w); et != nil {
-			plog.Debugf("error writing HTTPError (%v) to %s", et, r.RemoteAddr)
+			if lg != nil {
+				lg.Debug(
+					"failed to write v2 HTTP error",
+					zap.String("remote-addr", r.RemoteAddr),
+					zap.String("v2auth-error", e.Error()),
+					zap.Error(et),
+				)
+			}
 		}
 		return
 	}
-	etcdhttp.WriteError(w, r, err)
+	etcdhttp.WriteError(lg, w, r, err)
 }
 
 // allowMethod verifies that the given method is one of the allowed methods,
@@ -66,9 +67,16 @@ func allowMethod(w http.ResponseWriter, m string, ms ...string) bool {
 	return false
 }
 
-func requestLogger(handler http.Handler) http.Handler {
+func requestLogger(lg *zap.Logger, handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		plog.Debugf("[%s] %s remote:%s", r.Method, r.RequestURI, r.RemoteAddr)
+		if lg != nil {
+			lg.Debug(
+				"handling HTTP request",
+				zap.String("method", r.Method),
+				zap.String("request-uri", r.RequestURI),
+				zap.String("remote-addr", r.RemoteAddr),
+			)
+		}
 		handler.ServeHTTP(w, r)
 	})
 }

@@ -18,12 +18,13 @@ import (
 	"context"
 	"strings"
 
-	"github.com/coreos/etcd/etcdserver"
-	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
-	"github.com/coreos/etcd/etcdserver/membership"
-	"github.com/coreos/etcd/internal/auth"
-	"github.com/coreos/etcd/internal/lease"
-	"github.com/coreos/etcd/internal/mvcc"
+	"go.etcd.io/etcd/v3/auth"
+	"go.etcd.io/etcd/v3/etcdserver"
+	"go.etcd.io/etcd/v3/etcdserver/api/membership"
+	"go.etcd.io/etcd/v3/etcdserver/api/v3rpc/rpctypes"
+	pb "go.etcd.io/etcd/v3/etcdserver/etcdserverpb"
+	"go.etcd.io/etcd/v3/lease"
+	"go.etcd.io/etcd/v3/mvcc"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -34,7 +35,10 @@ var toGRPCErrorMap = map[error]error{
 	membership.ErrIDNotFound:              rpctypes.ErrGRPCMemberNotFound,
 	membership.ErrIDExists:                rpctypes.ErrGRPCMemberExist,
 	membership.ErrPeerURLexists:           rpctypes.ErrGRPCPeerURLExist,
+	membership.ErrMemberNotLearner:        rpctypes.ErrGRPCMemberNotLearner,
+	membership.ErrTooManyLearners:         rpctypes.ErrGRPCTooManyLearners,
 	etcdserver.ErrNotEnoughStartedMembers: rpctypes.ErrMemberNotEnoughStarted,
+	etcdserver.ErrLearnerNotReady:         rpctypes.ErrGRPCLearnerNotReady,
 
 	mvcc.ErrCompacted:             rpctypes.ErrGRPCCompacted,
 	mvcc.ErrFutureRev:             rpctypes.ErrGRPCFutureRev,
@@ -44,6 +48,7 @@ var toGRPCErrorMap = map[error]error{
 
 	etcdserver.ErrNoLeader:                   rpctypes.ErrGRPCNoLeader,
 	etcdserver.ErrNotLeader:                  rpctypes.ErrGRPCNotLeader,
+	etcdserver.ErrLeaderChanged:              rpctypes.ErrGRPCLeaderChanged,
 	etcdserver.ErrStopped:                    rpctypes.ErrGRPCStopped,
 	etcdserver.ErrTimeout:                    rpctypes.ErrGRPCTimeout,
 	etcdserver.ErrTimeoutDueToLeaderFail:     rpctypes.ErrGRPCTimeoutDueToLeaderFail,
@@ -51,9 +56,17 @@ var toGRPCErrorMap = map[error]error{
 	etcdserver.ErrUnhealthy:                  rpctypes.ErrGRPCUnhealthy,
 	etcdserver.ErrKeyNotFound:                rpctypes.ErrGRPCKeyNotFound,
 	etcdserver.ErrCorrupt:                    rpctypes.ErrGRPCCorrupt,
+	etcdserver.ErrBadLeaderTransferee:        rpctypes.ErrGRPCBadLeaderTransferee,
 
-	lease.ErrLeaseNotFound: rpctypes.ErrGRPCLeaseNotFound,
-	lease.ErrLeaseExists:   rpctypes.ErrGRPCLeaseExist,
+	etcdserver.ErrClusterVersionUnavailable:     rpctypes.ErrGRPCClusterVersionUnavailable,
+	etcdserver.ErrWrongDowngradeVersionFormat:   rpctypes.ErrGRPCWrongDowngradeVersionFormat,
+	etcdserver.ErrInvalidDowngradeTargetVersion: rpctypes.ErrGRPCInvalidDowngradeTargetVersion,
+	etcdserver.ErrDowngradeInProcess:            rpctypes.ErrGRPCDowngradeInProcess,
+	etcdserver.ErrNoInflightDowngrade:           rpctypes.ErrGRPCNoInflightDowngrade,
+
+	lease.ErrLeaseNotFound:    rpctypes.ErrGRPCLeaseNotFound,
+	lease.ErrLeaseExists:      rpctypes.ErrGRPCLeaseExist,
+	lease.ErrLeaseTTLTooLarge: rpctypes.ErrGRPCLeaseTTLTooLarge,
 
 	auth.ErrRootUserNotExist:     rpctypes.ErrGRPCRootUserNotExist,
 	auth.ErrRootRoleNotExist:     rpctypes.ErrGRPCRootRoleNotExist,
@@ -62,6 +75,7 @@ var toGRPCErrorMap = map[error]error{
 	auth.ErrUserNotFound:         rpctypes.ErrGRPCUserNotFound,
 	auth.ErrRoleAlreadyExist:     rpctypes.ErrGRPCRoleAlreadyExist,
 	auth.ErrRoleNotFound:         rpctypes.ErrGRPCRoleNotFound,
+	auth.ErrRoleEmpty:            rpctypes.ErrGRPCRoleEmpty,
 	auth.ErrAuthFailed:           rpctypes.ErrGRPCAuthFailed,
 	auth.ErrPermissionDenied:     rpctypes.ErrGRPCPermissionDenied,
 	auth.ErrRoleNotGranted:       rpctypes.ErrGRPCRoleNotGranted,
@@ -113,4 +127,16 @@ func isClientCtxErr(ctxErr error, err error) bool {
 		}
 	}
 	return false
+}
+
+// in v3.4, learner is allowed to serve serializable read and endpoint status
+func isRPCSupportedForLearner(req interface{}) bool {
+	switch r := req.(type) {
+	case *pb.StatusRequest:
+		return true
+	case *pb.RangeRequest:
+		return r.Serializable
+	default:
+		return false
+	}
 }

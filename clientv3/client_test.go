@@ -21,8 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
-	"github.com/coreos/etcd/pkg/testutil"
+	"go.etcd.io/etcd/v3/etcdserver/api/v3rpc/rpctypes"
+	"go.etcd.io/etcd/v3/pkg/testutil"
+
+	"google.golang.org/grpc"
 )
 
 func TestDialCancel(t *testing.T) {
@@ -80,29 +82,32 @@ func TestDialCancel(t *testing.T) {
 func TestDialTimeout(t *testing.T) {
 	defer testutil.AfterTest(t)
 
+	// grpc.WithBlock to block until connection up or timeout
 	testCfgs := []Config{
 		{
 			Endpoints:   []string{"http://254.0.0.1:12345"},
 			DialTimeout: 2 * time.Second,
+			DialOptions: []grpc.DialOption{grpc.WithBlock()},
 		},
 		{
 			Endpoints:   []string{"http://254.0.0.1:12345"},
 			DialTimeout: time.Second,
+			DialOptions: []grpc.DialOption{grpc.WithBlock()},
 			Username:    "abc",
 			Password:    "def",
 		},
 	}
 
 	for i, cfg := range testCfgs {
-		donec := make(chan error)
-		go func() {
+		donec := make(chan error, 1)
+		go func(cfg Config) {
 			// without timeout, dial continues forever on ipv4 black hole
 			c, err := New(cfg)
 			if c != nil || err == nil {
 				t.Errorf("#%d: new client should fail", i)
 			}
 			donec <- err
-		}()
+		}(cfg)
 
 		time.Sleep(10 * time.Millisecond)
 
@@ -149,5 +154,15 @@ func TestIsHaltErr(t *testing.T) {
 	cancel()
 	if !isHaltErr(ctx, nil) {
 		t.Errorf("cancel on context should be Halted")
+	}
+}
+
+func TestCloseCtxClient(t *testing.T) {
+	ctx := context.Background()
+	c := NewCtxClient(ctx)
+	err := c.Close()
+	// Close returns ctx.toErr, a nil error means an open Done channel
+	if err == nil {
+		t.Errorf("failed to Close the client. %v", err)
 	}
 }

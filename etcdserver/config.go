@@ -22,9 +22,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/etcd/pkg/netutil"
-	"github.com/coreos/etcd/pkg/transport"
-	"github.com/coreos/etcd/pkg/types"
+	"go.etcd.io/etcd/v3/pkg/netutil"
+	"go.etcd.io/etcd/v3/pkg/transport"
+	"go.etcd.io/etcd/v3/pkg/types"
+
+	bolt "go.etcd.io/bbolt"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // ServerConfig holds the configuration of etcd as taken from the command line or discovery.
@@ -37,22 +41,78 @@ type ServerConfig struct {
 	DataDir        string
 	// DedicatedWALDir config will make the etcd to write the WAL to the WALDir
 	// rather than the dataDir/member/wal.
-	DedicatedWALDir     string
-	SnapCount           uint64
-	MaxSnapFiles        uint
-	MaxWALFiles         uint
+	DedicatedWALDir string
+
+	SnapshotCount uint64
+
+	// SnapshotCatchUpEntries is the number of entries for a slow follower
+	// to catch-up after compacting the raft storage entries.
+	// We expect the follower has a millisecond level latency with the leader.
+	// The max throughput is around 10K. Keep a 5K entries is enough for helping
+	// follower to catch up.
+	// WARNING: only change this for tests. Always use "DefaultSnapshotCatchUpEntries"
+	SnapshotCatchUpEntries uint64
+
+	MaxSnapFiles uint
+	MaxWALFiles  uint
+
+	// BackendBatchInterval is the maximum time before commit the backend transaction.
+	BackendBatchInterval time.Duration
+	// BackendBatchLimit is the maximum operations before commit the backend transaction.
+	BackendBatchLimit int
+
+	// BackendFreelistType is the type of the backend boltdb freelist.
+	BackendFreelistType bolt.FreelistType
+
 	InitialPeerURLsMap  types.URLsMap
 	InitialClusterToken string
 	NewCluster          bool
-	ForceNewCluster     bool
 	PeerTLSInfo         transport.TLSInfo
 
-	TickMs           uint
-	ElectionTicks    int
+	CORS map[string]struct{}
+
+	// HostWhitelist lists acceptable hostnames from client requests.
+	// If server is insecure (no TLS), server only accepts requests
+	// whose Host header value exists in this white list.
+	HostWhitelist map[string]struct{}
+
+	TickMs        uint
+	ElectionTicks int
+
+	// InitialElectionTickAdvance is true, then local member fast-forwards
+	// election ticks to speed up "initial" leader election trigger. This
+	// benefits the case of larger election ticks. For instance, cross
+	// datacenter deployment may require longer election timeout of 10-second.
+	// If true, local node does not need wait up to 10-second. Instead,
+	// forwards its election ticks to 8-second, and have only 2-second left
+	// before leader election.
+	//
+	// Major assumptions are that:
+	//  - cluster has no active leader thus advancing ticks enables faster
+	//    leader election, or
+	//  - cluster already has an established leader, and rejoining follower
+	//    is likely to receive heartbeats from the leader after tick advance
+	//    and before election timeout.
+	//
+	// However, when network from leader to rejoining follower is congested,
+	// and the follower does not receive leader heartbeat within left election
+	// ticks, disruptive election has to happen thus affecting cluster
+	// availabilities.
+	//
+	// Disabling this would slow down initial bootstrap process for cross
+	// datacenter deployments. Make your own tradeoffs by configuring
+	// --initial-election-tick-advance at the cost of slow initial bootstrap.
+	//
+	// If single-node, it advances ticks regardless.
+	//
+	// See https://github.com/etcd-io/etcd/issues/9333 for more detail.
+	InitialElectionTickAdvance bool
+
 	BootstrapTimeout time.Duration
 
 	AutoCompactionRetention time.Duration
 	AutoCompactionMode      string
+	CompactionBatchLimit    int
 	QuotaBackendBytes       int64
 	MaxTxnOps               uint
 
@@ -64,14 +124,42 @@ type ServerConfig struct {
 	// ClientCertAuthEnabled is true when cert has been signed by the client CA.
 	ClientCertAuthEnabled bool
 
-	AuthToken string
+	AuthToken  string
+	BcryptCost uint
+	TokenTTL   uint
 
 	// InitialCorruptCheck is true to check data corruption on boot
 	// before serving any peer/client traffic.
 	InitialCorruptCheck bool
 	CorruptCheckTime    time.Duration
 
-	Debug bool
+	// PreVote is true to enable Raft Pre-Vote.
+	PreVote bool
+
+	// Logger logs server-side operations.
+	// If not nil, it disables "capnslog" and uses the given logger.
+	Logger *zap.Logger
+
+	// LoggerConfig is server logger configuration for Raft logger.
+	// Must be either: "LoggerConfig != nil" or "LoggerCore != nil && LoggerWriteSyncer != nil".
+	LoggerConfig *zap.Config
+	// LoggerCore is "zapcore.Core" for raft logger.
+	// Must be either: "LoggerConfig != nil" or "LoggerCore != nil && LoggerWriteSyncer != nil".
+	LoggerCore        zapcore.Core
+	LoggerWriteSyncer zapcore.WriteSyncer
+
+	ForceNewCluster bool
+
+	// EnableLeaseCheckpoint enables primary lessor to persist lease remainingTTL to prevent indefinite auto-renewal of long lived leases.
+	EnableLeaseCheckpoint bool
+	// LeaseCheckpointInterval time.Duration is the wait duration between lease checkpoints.
+	LeaseCheckpointInterval time.Duration
+
+	EnableGRPCGateway bool
+
+	// UnsafeNoFsync disables all uses of fsync.
+	// Setting this is unsafe and will cause data loss.
+	UnsafeNoFsync bool `json:"unsafe-no-fsync"`
 }
 
 // VerifyBootstrap sanity-checks the initial config for bootstrap case
@@ -124,7 +212,7 @@ func (c *ServerConfig) advertiseMatchesCluster() error {
 	sort.Strings(apurls)
 	ctx, cancel := context.WithTimeout(context.TODO(), 30*time.Second)
 	defer cancel()
-	ok, err := netutil.URLStringsEqual(ctx, apurls, urls.StringSlice())
+	ok, err := netutil.URLStringsEqual(ctx, c.Logger, apurls, urls.StringSlice())
 	if ok {
 		return nil
 	}
@@ -196,36 +284,6 @@ func (c *ServerConfig) electionTimeout() time.Duration {
 func (c *ServerConfig) peerDialTimeout() time.Duration {
 	// 1s for queue wait and election timeout
 	return time.Second + time.Duration(c.ElectionTicks*int(c.TickMs))*time.Millisecond
-}
-
-func (c *ServerConfig) PrintWithInitial() { c.print(true) }
-
-func (c *ServerConfig) Print() { c.print(false) }
-
-func (c *ServerConfig) print(initial bool) {
-	plog.Infof("name = %s", c.Name)
-	if c.ForceNewCluster {
-		plog.Infof("force new cluster")
-	}
-	plog.Infof("data dir = %s", c.DataDir)
-	plog.Infof("member dir = %s", c.MemberDir())
-	if c.DedicatedWALDir != "" {
-		plog.Infof("dedicated WAL dir = %s", c.DedicatedWALDir)
-	}
-	plog.Infof("heartbeat = %dms", c.TickMs)
-	plog.Infof("election = %dms", c.ElectionTicks*int(c.TickMs))
-	plog.Infof("snapshot count = %d", c.SnapCount)
-	if len(c.DiscoveryURL) != 0 {
-		plog.Infof("discovery URL= %s", c.DiscoveryURL)
-		if len(c.DiscoveryProxy) != 0 {
-			plog.Infof("discovery proxy = %s", c.DiscoveryProxy)
-		}
-	}
-	plog.Infof("advertise client URLs = %s", c.ClientURLs)
-	if initial {
-		plog.Infof("initial advertise peer URLs = %s", c.PeerURLs)
-		plog.Infof("initial cluster = %s", c.InitialPeerURLsMap)
-	}
 }
 
 func checkDuplicateURL(urlsmap types.URLsMap) bool {

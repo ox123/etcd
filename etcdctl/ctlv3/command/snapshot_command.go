@@ -20,11 +20,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/coreos/etcd/pkg/logger"
-	"github.com/coreos/etcd/pkg/types"
-	"github.com/coreos/etcd/snapshot"
+	"go.etcd.io/etcd/v3/clientv3/snapshot"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 )
 
 const (
@@ -96,18 +95,22 @@ func snapshotSaveCommandFunc(cmd *cobra.Command, args []string) {
 		ExitWithError(ExitBadArgs, err)
 	}
 
-	lg := logger.NewDiscardLogger()
-	debug, err := cmd.Flags().GetBool("debug")
+	lg, err := zap.NewProduction()
 	if err != nil {
 		ExitWithError(ExitError, err)
 	}
-	if debug {
-		lg = logger.NewPackageLogger("github.com/coreos/etcd", "snapshot")
+	sp := snapshot.NewV3(lg)
+	cfg := mustClientCfgFromCmd(cmd)
+
+	// if user does not specify "--command-timeout" flag, there will be no timeout for snapshot save command
+	ctx, cancel := context.WithCancel(context.Background())
+	if isCommandTimeoutFlagSet(cmd) {
+		ctx, cancel = commandCtx(cmd)
 	}
-	sp := snapshot.NewV3(mustClientFromCmd(cmd), lg)
+	defer cancel()
 
 	path := args[0]
-	if err := sp.Save(context.TODO(), path); err != nil {
+	if err := sp.Save(ctx, *cfg, path); err != nil {
 		ExitWithError(ExitInterrupted, err)
 	}
 	fmt.Printf("Snapshot saved at %s\n", path)
@@ -120,16 +123,11 @@ func snapshotStatusCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	initDisplayFromCmd(cmd)
 
-	lg := logger.NewDiscardLogger()
-	debug, err := cmd.Flags().GetBool("debug")
+	lg, err := zap.NewProduction()
 	if err != nil {
 		ExitWithError(ExitError, err)
 	}
-	if debug {
-		lg = logger.NewPackageLogger("github.com/coreos/etcd", "snapshot")
-	}
-	sp := snapshot.NewV3(nil, lg)
-
+	sp := snapshot.NewV3(lg)
 	ds, err := sp.Status(args[0])
 	if err != nil {
 		ExitWithError(ExitError, err)
@@ -143,11 +141,6 @@ func snapshotRestoreCommandFunc(cmd *cobra.Command, args []string) {
 		ExitWithError(ExitBadArgs, err)
 	}
 
-	urlmap, uerr := types.NewURLsMap(restoreCluster)
-	if uerr != nil {
-		ExitWithError(ExitBadArgs, uerr)
-	}
-
 	dataDir := restoreDataDir
 	if dataDir == "" {
 		dataDir = restoreName + ".etcd"
@@ -158,23 +151,20 @@ func snapshotRestoreCommandFunc(cmd *cobra.Command, args []string) {
 		walDir = filepath.Join(dataDir, "member", "wal")
 	}
 
-	lg := logger.NewDiscardLogger()
-	debug, err := cmd.Flags().GetBool("debug")
+	lg, err := zap.NewProduction()
 	if err != nil {
 		ExitWithError(ExitError, err)
 	}
-	if debug {
-		lg = logger.NewPackageLogger("github.com/coreos/etcd", "snapshot")
-	}
-	sp := snapshot.NewV3(nil, lg)
+	sp := snapshot.NewV3(lg)
 
-	if err := sp.Restore(args[0], snapshot.RestoreConfig{
+	if err := sp.Restore(snapshot.RestoreConfig{
+		SnapshotPath:        args[0],
 		Name:                restoreName,
 		OutputDataDir:       dataDir,
 		OutputWALDir:        walDir,
-		InitialCluster:      urlmap,
+		PeerURLs:            strings.Split(restorePeerURLs, ","),
+		InitialCluster:      restoreCluster,
 		InitialClusterToken: restoreClusterToken,
-		PeerURLs:            types.MustNewURLs(strings.Split(restorePeerURLs, ",")),
 		SkipHashCheck:       skipHashCheck,
 	}); err != nil {
 		ExitWithError(ExitError, err)

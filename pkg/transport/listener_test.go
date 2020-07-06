@@ -16,20 +16,28 @@ package transport
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 )
 
-func createSelfCert() (*TLSInfo, func(), error) {
+func createSelfCert(hosts ...string) (*TLSInfo, func(), error) {
+	return createSelfCertEx("127.0.0.1")
+}
+
+func createSelfCertEx(host string, additionalUsages ...x509.ExtKeyUsage) (*TLSInfo, func(), error) {
 	d, terr := ioutil.TempDir("", "etcd-test-tls-")
 	if terr != nil {
 		return nil, nil, terr
 	}
-	info, err := SelfCert(d, []string{"127.0.0.1"})
+	info, err := SelfCert(zap.NewExample(), d, []string{host + ":0"}, additionalUsages...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -70,7 +78,106 @@ func testNewListenerTLSInfoAccept(t *testing.T, tlsInfo TLSInfo) {
 	}
 	defer conn.Close()
 	if _, ok := conn.(*tls.Conn); !ok {
-		t.Errorf("failed to accept *tls.Conn")
+		t.Error("failed to accept *tls.Conn")
+	}
+}
+
+// TestNewListenerTLSInfoSkipClientSANVerify tests that if client IP address mismatches
+// with specified address in its certificate the connection is still accepted
+// if the flag SkipClientSANVerify is set (i.e. checkSAN() is disabled for the client side)
+func TestNewListenerTLSInfoSkipClientSANVerify(t *testing.T) {
+	tests := []struct {
+		skipClientSANVerify bool
+		goodClientHost      bool
+		acceptExpected      bool
+	}{
+		{false, true, true},
+		{false, false, false},
+		{true, true, true},
+		{true, false, true},
+	}
+	for _, test := range tests {
+		testNewListenerTLSInfoClientCheck(t, test.skipClientSANVerify, test.goodClientHost, test.acceptExpected)
+	}
+}
+
+func testNewListenerTLSInfoClientCheck(t *testing.T, skipClientSANVerify, goodClientHost, acceptExpected bool) {
+	tlsInfo, del, err := createSelfCert()
+	if err != nil {
+		t.Fatalf("unable to create cert: %v", err)
+	}
+	defer del()
+
+	host := "127.0.0.222"
+	if goodClientHost {
+		host = "127.0.0.1"
+	}
+	clientTLSInfo, del2, err := createSelfCertEx(host, x509.ExtKeyUsageClientAuth)
+	if err != nil {
+		t.Fatalf("unable to create cert: %v", err)
+	}
+	defer del2()
+
+	tlsInfo.SkipClientSANVerify = skipClientSANVerify
+	tlsInfo.TrustedCAFile = clientTLSInfo.CertFile
+
+	rootCAs := x509.NewCertPool()
+	loaded, err := ioutil.ReadFile(tlsInfo.CertFile)
+	if err != nil {
+		t.Fatalf("unexpected missing certfile: %v", err)
+	}
+	rootCAs.AppendCertsFromPEM(loaded)
+
+	clientCert, err := tls.LoadX509KeyPair(clientTLSInfo.CertFile, clientTLSInfo.KeyFile)
+	if err != nil {
+		t.Fatalf("unable to create peer cert: %v", err)
+	}
+
+	tlsConfig := &tls.Config{}
+	tlsConfig.InsecureSkipVerify = false
+	tlsConfig.Certificates = []tls.Certificate{clientCert}
+	tlsConfig.RootCAs = rootCAs
+
+	ln, err := NewListener("127.0.0.1:0", "https", tlsInfo)
+	if err != nil {
+		t.Fatalf("unexpected NewListener error: %v", err)
+	}
+	defer ln.Close()
+
+	tr := &http.Transport{TLSClientConfig: tlsConfig}
+	cli := &http.Client{Transport: tr}
+	chClientErr := make(chan error, 1)
+	go func() {
+		_, err := cli.Get("https://" + ln.Addr().String())
+		chClientErr <- err
+	}()
+
+	chAcceptErr := make(chan error, 1)
+	chAcceptConn := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			chAcceptErr <- err
+		} else {
+			chAcceptConn <- conn
+		}
+	}()
+
+	select {
+	case <-chClientErr:
+		if acceptExpected {
+			t.Errorf("accepted for good client address: skipClientSANVerify=%t, goodClientHost=%t", skipClientSANVerify, goodClientHost)
+		}
+	case acceptErr := <-chAcceptErr:
+		t.Fatalf("unexpected Accept error: %v", acceptErr)
+	case conn := <-chAcceptConn:
+		defer conn.Close()
+		if _, ok := conn.(*tls.Conn); !ok {
+			t.Errorf("failed to accept *tls.Conn")
+		}
+		if !acceptExpected {
+			t.Errorf("accepted for bad client address: skipClientSANVerify=%t, goodClientHost=%t", skipClientSANVerify, goodClientHost)
+		}
 	}
 }
 
@@ -95,12 +202,12 @@ func TestNewTransportTLSInfo(t *testing.T) {
 			KeyFile:  tlsinfo.KeyFile,
 		},
 		{
-			CertFile: tlsinfo.CertFile,
-			KeyFile:  tlsinfo.KeyFile,
-			CAFile:   tlsinfo.CAFile,
+			CertFile:      tlsinfo.CertFile,
+			KeyFile:       tlsinfo.KeyFile,
+			TrustedCAFile: tlsinfo.TrustedCAFile,
 		},
 		{
-			CAFile: tlsinfo.CAFile,
+			TrustedCAFile: tlsinfo.TrustedCAFile,
 		},
 	}
 
@@ -136,13 +243,13 @@ func TestTLSInfoEmpty(t *testing.T) {
 		want bool
 	}{
 		{TLSInfo{}, true},
-		{TLSInfo{CAFile: "baz"}, true},
+		{TLSInfo{TrustedCAFile: "baz"}, true},
 		{TLSInfo{CertFile: "foo"}, false},
 		{TLSInfo{KeyFile: "bar"}, false},
 		{TLSInfo{CertFile: "foo", KeyFile: "bar"}, false},
-		{TLSInfo{CertFile: "foo", CAFile: "baz"}, false},
-		{TLSInfo{KeyFile: "bar", CAFile: "baz"}, false},
-		{TLSInfo{CertFile: "foo", KeyFile: "bar", CAFile: "baz"}, false},
+		{TLSInfo{CertFile: "foo", TrustedCAFile: "baz"}, false},
+		{TLSInfo{KeyFile: "bar", TrustedCAFile: "baz"}, false},
+		{TLSInfo{CertFile: "foo", KeyFile: "bar", TrustedCAFile: "baz"}, false},
 	}
 
 	for i, tt := range tests {
@@ -163,8 +270,8 @@ func TestTLSInfoMissingFields(t *testing.T) {
 	tests := []TLSInfo{
 		{CertFile: tlsinfo.CertFile},
 		{KeyFile: tlsinfo.KeyFile},
-		{CertFile: tlsinfo.CertFile, CAFile: tlsinfo.CAFile},
-		{KeyFile: tlsinfo.KeyFile, CAFile: tlsinfo.CAFile},
+		{CertFile: tlsinfo.CertFile, TrustedCAFile: tlsinfo.TrustedCAFile},
+		{KeyFile: tlsinfo.KeyFile, TrustedCAFile: tlsinfo.TrustedCAFile},
 	}
 
 	for i, info := range tests {
@@ -215,7 +322,7 @@ func TestTLSInfoConfigFuncs(t *testing.T) {
 		},
 
 		{
-			info:       TLSInfo{CertFile: tlsinfo.CertFile, KeyFile: tlsinfo.KeyFile, CAFile: tlsinfo.CertFile},
+			info:       TLSInfo{CertFile: tlsinfo.CertFile, KeyFile: tlsinfo.KeyFile, TrustedCAFile: tlsinfo.CertFile},
 			clientAuth: tls.RequireAndVerifyClientCert,
 			wantCAs:    true,
 		},
@@ -259,7 +366,7 @@ func TestNewListenerTLSInfoSelfCert(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpdir)
-	tlsinfo, err := SelfCert(tmpdir, []string{"127.0.0.1"})
+	tlsinfo, err := SelfCert(zap.NewExample(), tmpdir, []string{"127.0.0.1"})
 	if err != nil {
 		t.Fatal(err)
 	}

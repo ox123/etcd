@@ -1,8 +1,12 @@
-# Interacting with etcd
+---
+title: Interacting with etcd
+---
 
 Users mostly interact with etcd by putting or getting the value of a key. This section describes how to do that by using etcdctl, a command line tool for interacting with etcd server. The concepts described here should apply to the gRPC APIs or client library APIs.
 
-By default, etcdctl talks to the etcd server with the v2 API for backward compatibility. For etcdctl to speak to etcd using the v3 API, the API version must be set to version 3 via the `ETCDCTL_API` environment variable. However note that any key that was created using the v2 API will not be able to be queried via the v3 API.  A v3 API ```etcdctl get``` of a v2 key will exit with 0 and no key data, this is the expected behaviour.
+The API version used by etcdctl to speak to etcd may be set to version `2` or `3` via the `ETCDCTL_API` environment variable. By default, etcdctl on master (3.4) uses the v3 API and earlier versions (3.3 and earlier) default to the v2 API.
+
+Note that any key that was created using the v2 API will not be able to be queried via the v3 API.  A v3 API ```etcdctl get``` of a v2 key will exit with 0 and no key data, this is the expected behaviour.
 
 
 ```bash
@@ -355,6 +359,26 @@ foo         # key
 bar_latest  # value of foo key after modification
 ```
 
+## Watch progress
+
+Applications may want to check the progress of a watch to determine how up-to-date the watch stream is. For example, if a watch is used to update a cache, it can be useful to know if the cache is stale compared to the revision from a quorum read. 
+
+Progress requests can be issued using the "progress" command in interactive watch session to ask the etcd server to send a progress notify update in the watch stream:
+
+```bash
+$ etcdctl watch -i
+$ watch a
+$ progress
+progress notify: 1
+# in another terminal: etcdctl put x 0
+# in another terminal: etcdctl put y 1
+$ progress
+progress notify: 3
+```
+
+Note: The revision number in the progress notify response is the revision from the local etcd server node that the watch stream is connected to. If this node is partitioned and not part of quorum, this progress notify revision might be lower than 
+than the revision returned by a quorum read against a non-partitioned etcd server node.
+
 ## Compacted revisions
 
 As we mentioned, etcd keeps revisions so that applications can read past versions of keys. However, to avoid accumulating an unbounded amount of history, it is important to compact past revisions. After compacting, etcd removes historical revisions, releasing resources for future use. All superseded data with revisions before the compacted revision will be unavailable.
@@ -384,9 +408,9 @@ Applications can grant leases for keys from an etcd cluster. When a key is attac
 Here is the command to grant a lease:
 
 ```bash
-# grant a lease with 10 second TTL
-$ etcdctl lease grant 10
-lease 32695410dcc0ca06 granted with TTL(10s)
+# grant a lease with 60 second TTL
+$ etcdctl lease grant 60
+lease 32695410dcc0ca06 granted with TTL(60s)
 
 # attach key foo to lease 32695410dcc0ca06
 $ etcdctl put --lease=32695410dcc0ca06 foo bar
@@ -400,8 +424,8 @@ Applications revoke leases by lease ID. Revoking a lease deletes all of its atta
 Suppose we finished the following sequence of operations:
 
 ```bash
-$ etcdctl lease grant 10
-lease 32695410dcc0ca06 granted with TTL(10s)
+$ etcdctl lease grant 60
+lease 32695410dcc0ca06 granted with TTL(60s)
 $ etcdctl put --lease=32695410dcc0ca06 foo bar
 OK
 ```
@@ -423,17 +447,17 @@ Applications can keep a lease alive by refreshing its TTL so it does not expire.
 Suppose we finished the following sequence of operations:
 
 ```bash
-$ etcdctl lease grant 10
-lease 32695410dcc0ca06 granted with TTL(10s)
+$ etcdctl lease grant 60
+lease 32695410dcc0ca06 granted with TTL(60s)
 ```
 
 Here is the command to keep the same lease alive:
 
 ```bash
 $ etcdctl lease keep-alive 32695410dcc0ca06
-lease 32695410dcc0ca06 keepalived with TTL(10)
-lease 32695410dcc0ca06 keepalived with TTL(10)
-lease 32695410dcc0ca06 keepalived with TTL(10)
+lease 32695410dcc0ca06 keepalived with TTL(60)
+lease 32695410dcc0ca06 keepalived with TTL(60)
+lease 32695410dcc0ca06 keepalived with TTL(60)
 ...
 ```
 

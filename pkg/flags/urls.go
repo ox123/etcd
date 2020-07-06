@@ -15,26 +15,30 @@
 package flags
 
 import (
+	"flag"
+	"fmt"
+	"net/url"
 	"strings"
 
-	"github.com/coreos/etcd/pkg/types"
+	"go.etcd.io/etcd/v3/pkg/types"
 )
 
+// URLsValue wraps "types.URLs".
 type URLsValue types.URLs
 
 // Set parses a command line set of URLs formatted like:
 // http://127.0.0.1:2380,http://10.1.1.2:80
+// Implements "flag.Value" interface.
 func (us *URLsValue) Set(s string) error {
-	strs := strings.Split(s, ",")
-	nus, err := types.NewURLs(strs)
+	ss, err := types.NewURLs(strings.Split(s, ","))
 	if err != nil {
 		return err
 	}
-
-	*us = URLsValue(nus)
+	*us = URLsValue(ss)
 	return nil
 }
 
+// String implements "flag.Value" interface.
 func (us *URLsValue) String() string {
 	all := make([]string, len(*us))
 	for i, u := range *us {
@@ -43,10 +47,20 @@ func (us *URLsValue) String() string {
 	return strings.Join(all, ",")
 }
 
-func NewURLsValue(init string) *URLsValue {
+// NewURLsValue implements "url.URL" slice as flag.Value interface.
+// Given value is to be separated by comma.
+func NewURLsValue(s string) *URLsValue {
+	if s == "" {
+		return &URLsValue{}
+	}
 	v := &URLsValue{}
-	if err := v.Set(init); err != nil {
-		plog.Panicf("new URLsValue should never fail: %v", err)
+	if err := v.Set(s); err != nil {
+		panic(fmt.Sprintf("new URLsValue should never fail: %v", err))
 	}
 	return v
+}
+
+// URLsFromFlag returns a slices from url got from the flag.
+func URLsFromFlag(fs *flag.FlagSet, urlsFlagName string) []url.URL {
+	return []url.URL(*fs.Lookup(urlsFlagName).Value.(*URLsValue))
 }

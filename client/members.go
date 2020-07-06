@@ -23,7 +23,7 @@ import (
 	"net/url"
 	"path"
 
-	"github.com/coreos/etcd/pkg/types"
+	"go.etcd.io/etcd/v3/pkg/types"
 )
 
 var (

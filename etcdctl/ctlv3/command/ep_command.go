@@ -20,11 +20,12 @@ import (
 	"sync"
 	"time"
 
-	v3 "github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
-	"github.com/coreos/etcd/pkg/flags"
+	v3 "go.etcd.io/etcd/v3/clientv3"
+	"go.etcd.io/etcd/v3/etcdserver/api/v3rpc/rpctypes"
+	"go.etcd.io/etcd/v3/pkg/flags"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 )
 
 var epClusterEndpoints bool
@@ -60,7 +61,7 @@ func newEpStatusCommand() *cobra.Command {
 		Use:   "status",
 		Short: "Prints out the status of endpoints specified in `--endpoints` flag",
 		Long: `When --write-out is set to simple, this command prints out comma-separated status lists for each endpoint.
-The items in the lists are endpoint, ID, version, db size, is leader, raft term, raft index.
+The items in the lists are endpoint, ID, version, db size, is leader, is learner, raft term, raft index, raft applied index, errors.
 `,
 		Run: epStatusCommandFunc,
 	}
@@ -76,9 +77,21 @@ func newEpHashKVCommand() *cobra.Command {
 	return hc
 }
 
+type epHealth struct {
+	Ep     string `json:"endpoint"`
+	Health bool   `json:"health"`
+	Took   string `json:"took"`
+	Error  string `json:"error,omitempty"`
+}
+
 // epHealthCommandFunc executes the "endpoint-health" command.
 func epHealthCommandFunc(cmd *cobra.Command, args []string) {
-	flags.SetPflagsFromEnv("ETCDCTL", cmd.InheritedFlags())
+	lg, err := zap.NewProduction()
+	if err != nil {
+		ExitWithError(ExitError, err)
+	}
+	flags.SetPflagsFromEnv(lg, "ETCDCTL", cmd.InheritedFlags())
+	initDisplayFromCmd(cmd)
 
 	sec := secureCfgFromCmd(cmd)
 	dt := dialTimeoutFromCmd(cmd)
@@ -95,7 +108,7 @@ func epHealthCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	var wg sync.WaitGroup
-	errc := make(chan error, len(cfgs))
+	hch := make(chan epHealth, len(cfgs))
 	for _, cfg := range cfgs {
 		wg.Add(1)
 		go func(cfg *v3.Config) {
@@ -103,7 +116,7 @@ func epHealthCommandFunc(cmd *cobra.Command, args []string) {
 			ep := cfg.Endpoints[0]
 			cli, err := v3.New(*cfg)
 			if err != nil {
-				errc <- fmt.Errorf("%s is unhealthy: failed to connect: %v", ep, err)
+				hch <- epHealth{Ep: ep, Health: false, Error: err.Error()}
 				return
 			}
 			st := time.Now()
@@ -112,25 +125,29 @@ func epHealthCommandFunc(cmd *cobra.Command, args []string) {
 			ctx, cancel := commandCtx(cmd)
 			_, err = cli.Get(ctx, "health")
 			cancel()
+			eh := epHealth{Ep: ep, Health: false, Took: time.Since(st).String()}
 			// permission denied is OK since proposal goes through consensus to get it
 			if err == nil || err == rpctypes.ErrPermissionDenied {
-				fmt.Printf("%s is healthy: successfully committed proposal: took = %v\n", ep, time.Since(st))
+				eh.Health = true
 			} else {
-				errc <- fmt.Errorf("%s is unhealthy: failed to commit proposal: %v", ep, err)
+				eh.Error = err.Error()
 			}
+			hch <- eh
 		}(cfg)
 	}
 
 	wg.Wait()
-	close(errc)
+	close(hch)
 
 	errs := false
-	for err := range errc {
-		if err != nil {
+	healthList := []epHealth{}
+	for h := range hch {
+		healthList = append(healthList, h)
+		if h.Error != "" {
 			errs = true
-			fmt.Fprintln(os.Stderr, err)
 		}
 	}
+	display.EndpointHealth(healthList)
 	if errs {
 		ExitWithError(ExitError, fmt.Errorf("unhealthy cluster"))
 	}

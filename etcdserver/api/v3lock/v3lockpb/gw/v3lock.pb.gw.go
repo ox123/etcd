@@ -9,7 +9,7 @@ It translates gRPC into RESTful JSON APIs.
 package gw
 
 import (
-	"github.com/coreos/etcd/etcdserver/api/v3lock/v3lockpb"
+	"go.etcd.io/etcd/v3/etcdserver/api/v3lock/v3lockpb"
 	"io"
 	"net/http"
 
@@ -33,7 +33,7 @@ func request_Lock_Lock_0(ctx context.Context, marshaler runtime.Marshaler, clien
 	var protoReq v3lockpb.LockRequest
 	var metadata runtime.ServerMetadata
 
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil {
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && err != io.EOF {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 
@@ -46,7 +46,7 @@ func request_Lock_Unlock_0(ctx context.Context, marshaler runtime.Marshaler, cli
 	var protoReq v3lockpb.UnlockRequest
 	var metadata runtime.ServerMetadata
 
-	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil {
+	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && err != io.EOF {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 

@@ -19,11 +19,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/raft"
+	"go.etcd.io/etcd/v3/raft"
 )
 
 func BenchmarkProposal3Nodes(b *testing.B) {
-	peers := []raft.Peer{{Id: 1, Context: nil}, {Id: 2, Context: nil}, {Id: 3, Context: nil}}
+	peers := []raft.Peer{{ID: 1, Context: nil}, {ID: 2, Context: nil}, {ID: 3, Context: nil}}
 	nt := newRaftNetwork(1, 2, 3)
 
 	nodes := make([]*node, 0)

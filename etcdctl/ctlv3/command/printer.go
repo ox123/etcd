@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"strings"
 
-	v3 "github.com/coreos/etcd/clientv3"
-	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	"github.com/coreos/etcd/snapshot"
+	v3 "go.etcd.io/etcd/v3/clientv3"
+	"go.etcd.io/etcd/v3/clientv3/snapshot"
+	pb "go.etcd.io/etcd/v3/etcdserver/etcdserverpb"
 
 	"github.com/dustin/go-humanize"
 )
@@ -42,8 +42,10 @@ type printer interface {
 	MemberAdd(v3.MemberAddResponse)
 	MemberRemove(id uint64, r v3.MemberRemoveResponse)
 	MemberUpdate(id uint64, r v3.MemberUpdateResponse)
+	MemberPromote(id uint64, r v3.MemberPromoteResponse)
 	MemberList(v3.MemberListResponse)
 
+	EndpointHealth([]epHealth)
 	EndpointStatus([]epStatus)
 	EndpointHashKV([]epHashKV)
 	MoveLeader(leader, target uint64, r v3.MoveLeaderResponse)
@@ -65,6 +67,8 @@ type printer interface {
 	UserGrantRole(user string, role string, r v3.AuthUserGrantRoleResponse)
 	UserRevokeRole(user string, role string, r v3.AuthUserRevokeRoleResponse)
 	UserDelete(user string, r v3.AuthUserDeleteResponse)
+
+	AuthStatus(r v3.AuthStatusResponse)
 }
 
 func NewPrinter(printerType string, isHex bool) printer {
@@ -74,7 +78,7 @@ func NewPrinter(printerType string, isHex bool) printer {
 	case "fields":
 		return &fieldsPrinter{newPrinterUnsupported("fields")}
 	case "json":
-		return newJSONPrinter()
+		return newJSONPrinter(isHex)
 	case "protobuf":
 		return newPBPrinter()
 	case "table":
@@ -139,6 +143,9 @@ func (p *printerRPC) UserRevokeRole(_ string, _ string, r v3.AuthUserRevokeRoleR
 func (p *printerRPC) UserDelete(_ string, r v3.AuthUserDeleteResponse) {
 	p.p((*pb.AuthUserDeleteResponse)(&r))
 }
+func (p *printerRPC) AuthStatus(r v3.AuthStatusResponse) {
+	p.p((*pb.AuthStatusResponse)(&r))
+}
 
 type printerUnsupported struct{ printerRPC }
 
@@ -149,6 +156,7 @@ func newPrinterUnsupported(n string) printer {
 	return &printerUnsupported{printerRPC{nil, f}}
 }
 
+func (p *printerUnsupported) EndpointHealth([]epHealth) { p.p(nil) }
 func (p *printerUnsupported) EndpointStatus([]epStatus) { p.p(nil) }
 func (p *printerUnsupported) EndpointHashKV([]epHashKV) { p.p(nil) }
 func (p *printerUnsupported) DBStatus(snapshot.Status)  { p.p(nil) }
@@ -156,11 +164,15 @@ func (p *printerUnsupported) DBStatus(snapshot.Status)  { p.p(nil) }
 func (p *printerUnsupported) MoveLeader(leader, target uint64, r v3.MoveLeaderResponse) { p.p(nil) }
 
 func makeMemberListTable(r v3.MemberListResponse) (hdr []string, rows [][]string) {
-	hdr = []string{"ID", "Status", "Name", "Peer Addrs", "Client Addrs"}
+	hdr = []string{"ID", "Status", "Name", "Peer Addrs", "Client Addrs", "Is Learner"}
 	for _, m := range r.Members {
 		status := "started"
 		if len(m.Name) == 0 {
 			status = "unstarted"
+		}
+		isLearner := "false"
+		if m.IsLearner {
+			isLearner = "true"
 		}
 		rows = append(rows, []string{
 			fmt.Sprintf("%x", m.ID),
@@ -168,13 +180,28 @@ func makeMemberListTable(r v3.MemberListResponse) (hdr []string, rows [][]string
 			m.Name,
 			strings.Join(m.PeerURLs, ","),
 			strings.Join(m.ClientURLs, ","),
+			isLearner,
+		})
+	}
+	return hdr, rows
+}
+
+func makeEndpointHealthTable(healthList []epHealth) (hdr []string, rows [][]string) {
+	hdr = []string{"endpoint", "health", "took", "error"}
+	for _, h := range healthList {
+		rows = append(rows, []string{
+			h.Ep,
+			fmt.Sprintf("%v", h.Health),
+			h.Took,
+			h.Error,
 		})
 	}
 	return hdr, rows
 }
 
 func makeEndpointStatusTable(statusList []epStatus) (hdr []string, rows [][]string) {
-	hdr = []string{"endpoint", "ID", "version", "db size", "is leader", "raft term", "raft index", "raft applied index", "errors"}
+	hdr = []string{"endpoint", "ID", "version", "db size", "is leader", "is learner", "raft term",
+		"raft index", "raft applied index", "errors"}
 	for _, status := range statusList {
 		rows = append(rows, []string{
 			status.Ep,
@@ -182,6 +209,7 @@ func makeEndpointStatusTable(statusList []epStatus) (hdr []string, rows [][]stri
 			status.Resp.Version,
 			humanize.Bytes(uint64(status.Resp.DbSize)),
 			fmt.Sprint(status.Resp.Leader == status.Resp.Header.MemberId),
+			fmt.Sprint(status.Resp.IsLearner),
 			fmt.Sprint(status.Resp.RaftTerm),
 			fmt.Sprint(status.Resp.RaftIndex),
 			fmt.Sprint(status.Resp.RaftAppliedIndex),

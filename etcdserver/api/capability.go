@@ -17,10 +17,11 @@ package api
 import (
 	"sync"
 
-	"github.com/coreos/etcd/internal/version"
+	"go.etcd.io/etcd/v3/etcdserver/api/membership"
+	"go.etcd.io/etcd/v3/version"
+	"go.uber.org/zap"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/coreos/pkg/capnslog"
 )
 
 type Capability string
@@ -31,14 +32,14 @@ const (
 )
 
 var (
-	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "etcdserver/api")
-
 	// capabilityMaps is a static map of version to capability map.
 	capabilityMaps = map[string]map[Capability]bool{
 		"3.0.0": {AuthCapability: true, V3rpcCapability: true},
 		"3.1.0": {AuthCapability: true, V3rpcCapability: true},
 		"3.2.0": {AuthCapability: true, V3rpcCapability: true},
 		"3.3.0": {AuthCapability: true, V3rpcCapability: true},
+		"3.4.0": {AuthCapability: true, V3rpcCapability: true},
+		"3.5.0": {AuthCapability: true, V3rpcCapability: true},
 	}
 
 	enableMapMu sync.RWMutex
@@ -56,20 +57,26 @@ func init() {
 }
 
 // UpdateCapability updates the enabledMap when the cluster version increases.
-func UpdateCapability(v *semver.Version) {
+func UpdateCapability(lg *zap.Logger, v *semver.Version) {
 	if v == nil {
 		// if recovered but version was never set by cluster
 		return
 	}
 	enableMapMu.Lock()
-	if curVersion != nil && !curVersion.LessThan(*v) {
+	if curVersion != nil && !membership.IsValidVersionChange(v, curVersion) {
 		enableMapMu.Unlock()
 		return
 	}
 	curVersion = v
 	enabledMap = capabilityMaps[curVersion.String()]
 	enableMapMu.Unlock()
-	plog.Infof("enabled capabilities for version %s", version.Cluster(v.String()))
+
+	if lg != nil {
+		lg.Info(
+			"enabled capabilities for version",
+			zap.String("cluster-version", version.Cluster(v.String())),
+		)
+	}
 }
 
 func IsCapabilityEnabled(c Capability) bool {

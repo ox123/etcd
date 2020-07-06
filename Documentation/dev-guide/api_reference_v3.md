@@ -10,15 +10,16 @@ This is a generated documentation. Please read the proto files for more.
 | ------ | ------------ | ------------- | ----------- |
 | AuthEnable | AuthEnableRequest | AuthEnableResponse | AuthEnable enables authentication. |
 | AuthDisable | AuthDisableRequest | AuthDisableResponse | AuthDisable disables authentication. |
+| AuthStatus | AuthStatusRequest | AuthStatusResponse | AuthStatus displays authentication status. |
 | Authenticate | AuthenticateRequest | AuthenticateResponse | Authenticate processes an authenticate request. |
-| UserAdd | AuthUserAddRequest | AuthUserAddResponse | UserAdd adds a new user. |
+| UserAdd | AuthUserAddRequest | AuthUserAddResponse | UserAdd adds a new user. User name cannot be empty. |
 | UserGet | AuthUserGetRequest | AuthUserGetResponse | UserGet gets detailed user information. |
 | UserList | AuthUserListRequest | AuthUserListResponse | UserList gets a list of all users. |
 | UserDelete | AuthUserDeleteRequest | AuthUserDeleteResponse | UserDelete deletes a specified user. |
 | UserChangePassword | AuthUserChangePasswordRequest | AuthUserChangePasswordResponse | UserChangePassword changes the password of a specified user. |
 | UserGrantRole | AuthUserGrantRoleRequest | AuthUserGrantRoleResponse | UserGrant grants a role to a specified user. |
 | UserRevokeRole | AuthUserRevokeRoleRequest | AuthUserRevokeRoleResponse | UserRevokeRole revokes a role of specified user. |
-| RoleAdd | AuthRoleAddRequest | AuthRoleAddResponse | RoleAdd adds a new role. |
+| RoleAdd | AuthRoleAddRequest | AuthRoleAddResponse | RoleAdd adds a new role. Role name cannot be empty. |
 | RoleGet | AuthRoleGetRequest | AuthRoleGetResponse | RoleGet gets detailed role information. |
 | RoleList | AuthRoleListRequest | AuthRoleListResponse | RoleList gets lists of all roles. |
 | RoleDelete | AuthRoleDeleteRequest | AuthRoleDeleteResponse | RoleDelete deletes a specified role. |
@@ -35,6 +36,7 @@ This is a generated documentation. Please read the proto files for more.
 | MemberRemove | MemberRemoveRequest | MemberRemoveResponse | MemberRemove removes an existing member from the cluster. |
 | MemberUpdate | MemberUpdateRequest | MemberUpdateResponse | MemberUpdate updates the member configuration. |
 | MemberList | MemberListRequest | MemberListResponse | MemberList lists all the members in the cluster. |
+| MemberPromote | MemberPromoteRequest | MemberPromoteResponse | MemberPromote promotes a member from raft learner (non-voting) to raft voting member. |
 
 
 
@@ -69,10 +71,11 @@ This is a generated documentation. Please read the proto files for more.
 | Alarm | AlarmRequest | AlarmResponse | Alarm activates, deactivates, and queries alarms regarding cluster health. |
 | Status | StatusRequest | StatusResponse | Status gets the status of the member. |
 | Defragment | DefragmentRequest | DefragmentResponse | Defragment defragments a member's backend database to recover storage space. |
-| Hash | HashRequest | HashResponse | Hash computes the hash of the KV's backend. This is designed for testing; do not use this in production when there are ongoing transactions. |
-| HashKV | HashKVRequest | HashKVResponse | HashKV computes the hash of all MVCC keys up to a given revision. |
+| Hash | HashRequest | HashResponse | Hash computes the hash of whole backend keyspace, including key, lease, and other buckets in storage. This is designed for testing ONLY! Do not rely on this in production with ongoing transactions, since Hash operation does not hold MVCC locks. Use "HashKV" API instead for "key" bucket consistency checks. |
+| HashKV | HashKVRequest | HashKVResponse | HashKV computes the hash of all MVCC keys up to a given revision. It only iterates "key" bucket in backend storage. |
 | Snapshot | SnapshotRequest | SnapshotResponse | Snapshot sends a snapshot of the entire backend from a member over a stream to a client. |
 | MoveLeader | MoveLeaderRequest | MoveLeaderResponse | MoveLeader requests current leader node to transfer its leadership to transferee. |
+| Downgrade | DowngradeRequest | DowngradeResponse | Downgrade requests downgrade, cancel downgrade on the cluster version. |
 
 
 
@@ -226,8 +229,8 @@ Empty field.
 | Field | Description | Type |
 | ----- | ----------- | ---- |
 | role |  | string |
-| key |  | string |
-| range_end |  | string |
+| key |  | bytes |
+| range_end |  | bytes |
 
 
 
@@ -239,12 +242,29 @@ Empty field.
 
 
 
+##### message `AuthStatusRequest` (etcdserver/etcdserverpb/rpc.proto)
+
+Empty field.
+
+
+
+##### message `AuthStatusResponse` (etcdserver/etcdserverpb/rpc.proto)
+
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| header |  | ResponseHeader |
+| enabled |  | bool |
+| authRevision | authRevision is the current revision of auth store | uint64 |
+
+
+
 ##### message `AuthUserAddRequest` (etcdserver/etcdserverpb/rpc.proto)
 
 | Field | Description | Type |
 | ----- | ----------- | ---- |
 | name |  | string |
 | password |  | string |
+| options |  | authpb.UserAddOptions |
 
 
 
@@ -443,6 +463,24 @@ Empty field.
 
 
 
+##### message `DowngradeRequest` (etcdserver/etcdserverpb/rpc.proto)
+
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| action | action is the kind of downgrade request to issue. The action may VALIDATE the target version, DOWNGRADE the cluster version, or CANCEL the current downgrading job. | DowngradeAction |
+| version | version is the target version to downgrade. | string |
+
+
+
+##### message `DowngradeResponse` (etcdserver/etcdserverpb/rpc.proto)
+
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| header |  | ResponseHeader |
+| version | version is the current cluster version. | string |
+
+
+
 ##### message `HashKVRequest` (etcdserver/etcdserverpb/rpc.proto)
 
 | Field | Description | Type |
@@ -473,6 +511,31 @@ Empty field.
 | ----- | ----------- | ---- |
 | header |  | ResponseHeader |
 | hash | hash is the hash value computed from the responding member's KV's backend. | uint32 |
+
+
+
+##### message `LeaseCheckpoint` (etcdserver/etcdserverpb/rpc.proto)
+
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| ID | ID is the lease ID to checkpoint. | int64 |
+| remaining_TTL | Remaining_TTL is the remaining time until expiry of the lease. | int64 |
+
+
+
+##### message `LeaseCheckpointRequest` (etcdserver/etcdserverpb/rpc.proto)
+
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| checkpoints |  | (slice of) LeaseCheckpoint |
+
+
+
+##### message `LeaseCheckpointResponse` (etcdserver/etcdserverpb/rpc.proto)
+
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| header |  | ResponseHeader |
 
 
 
@@ -582,6 +645,7 @@ Empty field.
 | name | name is the human-readable name of the member. If the member is not started, the name will be an empty string. | string |
 | peerURLs | peerURLs is the list of URLs the member exposes to the cluster for communication. | (slice of) string |
 | clientURLs | clientURLs is the list of URLs the member exposes to clients for communication. If the member is not started, clientURLs will be empty. | (slice of) string |
+| isLearner | isLearner indicates if the member is raft learner. | bool |
 
 
 
@@ -590,6 +654,7 @@ Empty field.
 | Field | Description | Type |
 | ----- | ----------- | ---- |
 | peerURLs | peerURLs is the list of URLs the added member will use to communicate with the cluster. | (slice of) string |
+| isLearner | isLearner indicates if the added member is raft learner. | bool |
 
 
 
@@ -605,7 +670,9 @@ Empty field.
 
 ##### message `MemberListRequest` (etcdserver/etcdserverpb/rpc.proto)
 
-Empty field.
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| linearizable |  | bool |
 
 
 
@@ -615,6 +682,23 @@ Empty field.
 | ----- | ----------- | ---- |
 | header |  | ResponseHeader |
 | members | members is a list of all members associated with the cluster. | (slice of) Member |
+
+
+
+##### message `MemberPromoteRequest` (etcdserver/etcdserverpb/rpc.proto)
+
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| ID | ID is the member ID of the member to promote. | uint64 |
+
+
+
+##### message `MemberPromoteResponse` (etcdserver/etcdserverpb/rpc.proto)
+
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| header |  | ResponseHeader |
+| members | members is a list of all members after promoting the member. | (slice of) Member |
 
 
 
@@ -706,7 +790,7 @@ Empty field.
 | count_only | count_only when set returns only the count of the keys in the range. | bool |
 | min_mod_revision | min_mod_revision is the lower bound for returned key mod revisions; all keys with lesser mod revisions will be filtered away. | int64 |
 | max_mod_revision | max_mod_revision is the upper bound for returned key mod revisions; all keys with greater mod revisions will be filtered away. | int64 |
-| min_create_revision | min_create_revision is the lower bound for returned key create revisions; all keys with lesser create trevisions will be filtered away. | int64 |
+| min_create_revision | min_create_revision is the lower bound for returned key create revisions; all keys with lesser create revisions will be filtered away. | int64 |
 | max_create_revision | max_create_revision is the upper bound for returned key create revisions; all keys with greater create revisions will be filtered away. | int64 |
 
 
@@ -740,7 +824,7 @@ Empty field.
 | ----- | ----------- | ---- |
 | cluster_id | cluster_id is the ID of the cluster which sent the response. | uint64 |
 | member_id | member_id is the ID of the member which sent the response. | uint64 |
-| revision | revision is the key-value store revision when the request was applied. | int64 |
+| revision | revision is the key-value store revision when the request was applied. For watch progress responses, the header.revision indicates progress. All future events recieved in this stream are guaranteed to have a higher revision number than the header.revision number. | int64 |
 | raft_term | raft_term is the raft term when the request was applied. | uint64 |
 
 
@@ -787,11 +871,12 @@ Empty field.
 | version | version is the cluster protocol version used by the responding member. | string |
 | dbSize | dbSize is the size of the backend database physically allocated, in bytes, of the responding member. | int64 |
 | leader | leader is the member ID which the responding member believes is the current leader. | uint64 |
-| raftIndex | raftIndex is the current raft index of the responding member. | uint64 |
+| raftIndex | raftIndex is the current raft committed index of the responding member. | uint64 |
 | raftTerm | raftTerm is the current raft term of the responding member. | uint64 |
 | raftAppliedIndex | raftAppliedIndex is the current raft applied index of the responding member. | uint64 |
 | errors | errors contains alarm/health information and status. | (slice of) string |
 | dbSizeInUse | dbSizeInUse is the size of the backend database logically in use, in bytes, of the responding member. | int64 |
+| isLearner | isLearner indicates if the member is raft learner. | bool |
 
 
 
@@ -836,6 +921,15 @@ From google paxosdb paper: Our implementation hinges around a powerful primitive
 | filters | filters filter the events at server side before it sends back to the watcher. | (slice of) FilterType |
 | prev_kv | If prev_kv is set, created watcher gets the previous KV before the event happens. If the previous KV is already compacted, nothing will be returned. | bool |
 | watch_id | If watch_id is provided and non-zero, it will be assigned to this watcher. Since creating a watcher in etcd is not a synchronous operation, this can be used ensure that ordering is correct when creating multiple watchers on the same stream. Creating a watcher with an ID already in use on the stream will cause an error to be returned. | int64 |
+| fragment | fragment enables splitting large revisions into multiple watch responses. | bool |
+
+
+
+##### message `WatchProgressRequest` (etcdserver/etcdserverpb/rpc.proto)
+
+Requests the a watch stream progress status be sent in the watch response stream as soon as possible.
+
+Empty field.
 
 
 
@@ -846,6 +940,7 @@ From google paxosdb paper: Our implementation hinges around a powerful primitive
 | request_union | request_union is a request to either create a new watcher or cancel an existing watcher. | oneof |
 | create_request |  | WatchCreateRequest |
 | cancel_request |  | WatchCancelRequest |
+| progress_request |  | WatchProgressRequest |
 
 
 
@@ -859,11 +954,12 @@ From google paxosdb paper: Our implementation hinges around a powerful primitive
 | canceled | canceled is set to true if the response is for a cancel watch request. No further events will be sent to the canceled watcher. | bool |
 | compact_revision | compact_revision is set to the minimum index if a watcher tries to watch at a compacted index.  This happens when creating a watcher at a compacted revision or the watcher cannot catch up with the progress of the key-value store.  The client should treat the watcher as canceled and should not try to create any watcher with the same start_revision again. | int64 |
 | cancel_reason | cancel_reason indicates the reason for canceling the watcher. | string |
+| fragment | framgment is true if large watch response was split over multiple responses. | bool |
 | events |  | (slice of) mvccpb.Event |
 
 
 
-##### message `Event` (internal/mvcc/mvccpb/kv.proto)
+##### message `Event` (mvcc/mvccpb/kv.proto)
 
 | Field | Description | Type |
 | ----- | ----------- | ---- |
@@ -873,7 +969,7 @@ From google paxosdb paper: Our implementation hinges around a powerful primitive
 
 
 
-##### message `KeyValue` (internal/mvcc/mvccpb/kv.proto)
+##### message `KeyValue` (mvcc/mvccpb/kv.proto)
 
 | Field | Description | Type |
 | ----- | ----------- | ---- |
@@ -886,16 +982,17 @@ From google paxosdb paper: Our implementation hinges around a powerful primitive
 
 
 
-##### message `Lease` (internal/lease/leasepb/lease.proto)
+##### message `Lease` (lease/leasepb/lease.proto)
 
 | Field | Description | Type |
 | ----- | ----------- | ---- |
 | ID |  | int64 |
 | TTL |  | int64 |
+| RemainingTTL |  | int64 |
 
 
 
-##### message `LeaseInternalRequest` (internal/lease/leasepb/lease.proto)
+##### message `LeaseInternalRequest` (lease/leasepb/lease.proto)
 
 | Field | Description | Type |
 | ----- | ----------- | ---- |
@@ -903,7 +1000,7 @@ From google paxosdb paper: Our implementation hinges around a powerful primitive
 
 
 
-##### message `LeaseInternalResponse` (internal/lease/leasepb/lease.proto)
+##### message `LeaseInternalResponse` (lease/leasepb/lease.proto)
 
 | Field | Description | Type |
 | ----- | ----------- | ---- |
@@ -911,7 +1008,7 @@ From google paxosdb paper: Our implementation hinges around a powerful primitive
 
 
 
-##### message `Permission` (internal/auth/authpb/auth.proto)
+##### message `Permission` (auth/authpb/auth.proto)
 
 Permission is a single entity
 
@@ -923,7 +1020,7 @@ Permission is a single entity
 
 
 
-##### message `Role` (internal/auth/authpb/auth.proto)
+##### message `Role` (auth/authpb/auth.proto)
 
 Role is a single entry in the bucket authRoles
 
@@ -934,7 +1031,7 @@ Role is a single entry in the bucket authRoles
 
 
 
-##### message `User` (internal/auth/authpb/auth.proto)
+##### message `User` (auth/authpb/auth.proto)
 
 User is a single entry in the bucket authUsers
 
@@ -943,6 +1040,15 @@ User is a single entry in the bucket authUsers
 | name |  | bytes |
 | password |  | bytes |
 | roles |  | (slice of) string |
+| options |  | UserAddOptions |
+
+
+
+##### message `UserAddOptions` (auth/authpb/auth.proto)
+
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| no_password |  | bool |
 
 
 

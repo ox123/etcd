@@ -1,4 +1,6 @@
-## Upgrade etcd from 3.1 to 3.2
+---
+title: Upgrade etcd from 3.1 to 3.2
+---
 
 In the general case, upgrading from etcd 3.1 to 3.2 can be a zero-downtime, rolling upgrade:
  - one by one, stop the etcd v3.1 processes and replace them with etcd v3.2 processes
@@ -8,13 +10,21 @@ Before [starting an upgrade](#upgrade-procedure), read through the rest of this 
 
 ### Upgrade checklists
 
+**NOTE:** When [migrating from v2 with no v3 data](https://github.com/etcd-io/etcd/issues/9480), etcd server v3.2+ panics when etcd restores from existing snapshots but no v3 `ETCD_DATA_DIR/member/snap/db` file. This happens when the server had migrated from v2 with no previous v3 data. This also prevents accidental v3 data loss (e.g. `db` file might have been moved). etcd requires that post v3 migration can only happen with v3 data. Do not upgrade to newer v3 versions until v3.0 server contains v3 data.
+
 Highlighted breaking changes in 3.2.
 
-#### Change in gRPC dependency (>=3.2.10)
+#### Changed default `snapshot-count` value
+
+Higher `--snapshot-count` holds more Raft entries in memory until snapshot, thus causing [recurrent higher memory usage](https://github.com/kubernetes/kubernetes/issues/60589#issuecomment-371977156). Since leader retains latest Raft entries for longer, a slow follower has more time to catch up before leader snapshot. `--snapshot-count` is a tradeoff between higher memory usage and better availabilities of slow followers.
+
+Since v3.2, the default value of `--snapshot-count` has [changed from from 10,000 to 100,000](https://github.com/etcd-io/etcd/pull/7160).
+
+#### Changed gRPC dependency (>=3.2.10)
 
 3.2.10 or later now requires [grpc/grpc-go](https://github.com/grpc/grpc-go/releases) `v1.7.5` (<=3.2.9 requires `v1.2.1`).
 
-##### Deprecate `grpclog.Logger`
+##### Deprecated `grpclog.Logger`
 
 `grpclog.Logger` has been deprecated in favor of [`grpclog.LoggerV2`](https://github.com/grpc/grpc-go/blob/master/grpclog/loggerv2.go). `clientv3.Logger` is now `grpclog.LoggerV2`.
 
@@ -35,9 +45,9 @@ clientv3.SetLogger(grpclog.NewLoggerV2(os.Stderr, os.Stderr, os.Stderr))
 // log.New above cannot be used (not implement grpclog.LoggerV2 interface)
 ```
 
-##### Deprecate `grpc.ErrClientConnTimeout`
+##### Deprecated `grpc.ErrClientConnTimeout`
 
-Previously, `grpc.ErrClientConnTimeout` error is returned on client dial time-outs. 3.2 instead returns `context.DeadlineExceeded` (see [#8504](https://github.com/coreos/etcd/issues/8504)).
+Previously, `grpc.ErrClientConnTimeout` error is returned on client dial time-outs. 3.2 instead returns `context.DeadlineExceeded` (see [#8504](https://github.com/etcd-io/etcd/issues/8504)).
 
 Before
 
@@ -64,7 +74,7 @@ if err == context.DeadlineExceeded {
 }
 ```
 
-#### Change in maximum request size limits (>=3.2.10)
+#### Changed maximum request size limits (>=3.2.10)
 
 3.2.10 and 3.2.11 allow custom request size limits in server side. >=3.2.12 allows custom request size limits for both server and **client side**. In previous versions(v3.2.10, v3.2.11), client response size was limited to only 4 MiB.
 
@@ -137,9 +147,9 @@ err.Error() == "rpc error: code = ResourceExhausted desc = grpc: received messag
 
 **If not specified, client-side send limit defaults to 2 MiB (1.5 MiB + gRPC overhead bytes) and receive limit to `math.MaxInt32`**. Please see [clientv3 godoc](https://godoc.org/github.com/coreos/etcd/clientv3#Config) for more detail.
 
-#### Change in raw gRPC client wrappers
+#### Changed raw gRPC client wrappers
 
-3.2.12 or later changes the function signatures of `clientv3` gRPC client wrapper. This change was needed to support [custom `grpc.CallOption` on message size limits](https://github.com/coreos/etcd/pull/9047).
+3.2.12 or later changes the function signatures of `clientv3` gRPC client wrapper. This change was needed to support [custom `grpc.CallOption` on message size limits](https://github.com/etcd-io/etcd/pull/9047).
 
 Before and after
 
@@ -160,9 +170,9 @@ Before and after
 +func NewWatchFromWatchClient(wc pb.WatchClient, c *Client) Watcher {
 ```
 
-#### Change in `clientv3.Lease.TimeToLive` API
+#### Changed `clientv3.Lease.TimeToLive` API
 
-Previously, `clientv3.Lease.TimeToLive` API returned `lease.ErrLeaseNotFound` on non-existent lease ID. 3.2 instead returns TTL=-1 in its response and no error (see [#7305](https://github.com/coreos/etcd/pull/7305)).
+Previously, `clientv3.Lease.TimeToLive` API returned `lease.ErrLeaseNotFound` on non-existent lease ID. 3.2 instead returns TTL=-1 in its response and no error (see [#7305](https://github.com/etcd-io/etcd/pull/7305)).
 
 Before
 
@@ -182,7 +192,7 @@ resp.TTL == -1
 err == nil
 ```
 
-#### Change in `clientv3.NewFromConfigFile`
+#### Moved `clientv3.NewFromConfigFile` to `clientv3.yaml.NewConfig`
 
 `clientv3.NewFromConfigFile` is moved to `yaml.NewConfig`.
 
@@ -204,13 +214,13 @@ clientv3yaml.NewConfig
 
 3.2 now rejects domains names for `--listen-peer-urls` and `--listen-client-urls` (3.1 only prints out warnings), since domain name is invalid for network interface binding. Make sure that those URLs are properly formated as `scheme://IP:port`.
 
-See [issue #6336](https://github.com/coreos/etcd/issues/6336) for more contexts.
+See [issue #6336](https://github.com/etcd-io/etcd/issues/6336) for more contexts.
 
 ### Server upgrade checklists
 
 #### Upgrade requirements
 
-To upgrade an existing etcd deployment to 3.2, the running cluster must be 3.1 or greater. If it's before 3.1, please [upgrade to 3.1](upgrade_3_1.md) before upgrading to 3.2.
+To upgrade an existing etcd deployment to 3.2, the running cluster must be 3.1 or greater. If it's before 3.1, please [upgrade to 3.1](../upgrade_3_1) before upgrading to 3.2.
 
 Also, to ensure a smooth rolling upgrade, the running cluster must be healthy. Check the health of the cluster by using the `etcdctl endpoint health` command before proceeding.
 
@@ -218,7 +228,7 @@ Also, to ensure a smooth rolling upgrade, the running cluster must be healthy. C
 
 Before upgrading etcd, always test the services relying on etcd in a staging environment before deploying the upgrade to the production environment.
 
-Before beginning, [backup the etcd data](../op-guide/maintenance.md#snapshot-backup). Should something go wrong with the upgrade, it is possible to use this backup to [downgrade](#downgrade) back to existing etcd version. Please note that the `snapshot` command only backs up the v3 data. For v2 data, see [backing up v2 datastore](../v2/admin_guide.md#backing-up-the-datastore).
+Before beginning, [backup the etcd data](../op-guide/maintenance.md#snapshot-backup). Should something go wrong with the upgrade, it is possible to use this backup to [downgrade](#downgrade) back to existing etcd version. Please note that the `snapshot` command only backs up the v3 data. For v2 data, see [backing up v2 datastore](/docs/v2/admin_guide#backing-up-the-datastore).
 
 #### Mixed versions
 

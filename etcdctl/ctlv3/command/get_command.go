@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/coreos/etcd/clientv3"
 	"github.com/spf13/cobra"
+	"go.etcd.io/etcd/v3/clientv3"
 )
 
 var (
@@ -31,6 +31,7 @@ var (
 	getFromKey     bool
 	getRev         int64
 	getKeysOnly    bool
+	getCountOnly   bool
 	printValueOnly bool
 )
 
@@ -50,13 +51,14 @@ func NewGetCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&getFromKey, "from-key", false, "Get keys that are greater than or equal to the given key using byte compare")
 	cmd.Flags().Int64Var(&getRev, "rev", 0, "Specify the kv revision")
 	cmd.Flags().BoolVar(&getKeysOnly, "keys-only", false, "Get only the keys")
+	cmd.Flags().BoolVar(&getCountOnly, "count-only", false, "Get only the count")
 	cmd.Flags().BoolVar(&printValueOnly, "print-value-only", false, `Only write values when using the "simple" output format`)
 	return cmd
 }
 
 // getCommandFunc executes the "get" command.
 func getCommandFunc(cmd *cobra.Command, args []string) {
-	key, opts := getGetOp(cmd, args)
+	key, opts := getGetOp(args)
 	ctx, cancel := commandCtx(cmd)
 	resp, err := mustClientFromCmd(cmd).Get(ctx, key, opts...)
 	cancel()
@@ -64,23 +66,33 @@ func getCommandFunc(cmd *cobra.Command, args []string) {
 		ExitWithError(ExitError, err)
 	}
 
+	if getCountOnly {
+		if _, fields := display.(*fieldsPrinter); !fields {
+			ExitWithError(ExitBadArgs, fmt.Errorf("--count-only is only for `--write-out=fields`"))
+		}
+	}
+
 	if printValueOnly {
 		dp, simple := (display).(*simplePrinter)
 		if !simple {
-			ExitWithError(ExitBadArgs, fmt.Errorf("print-value-only is only for `--write-out=simple`."))
+			ExitWithError(ExitBadArgs, fmt.Errorf("print-value-only is only for `--write-out=simple`"))
 		}
 		dp.valueOnly = true
 	}
 	display.Get(*resp)
 }
 
-func getGetOp(cmd *cobra.Command, args []string) (string, []clientv3.OpOption) {
+func getGetOp(args []string) (string, []clientv3.OpOption) {
 	if len(args) == 0 {
-		ExitWithError(ExitBadArgs, fmt.Errorf("range command needs arguments."))
+		ExitWithError(ExitBadArgs, fmt.Errorf("get command needs one argument as key and an optional argument as range_end"))
 	}
 
 	if getPrefix && getFromKey {
-		ExitWithError(ExitBadArgs, fmt.Errorf("`--prefix` and `--from-key` cannot be set at the same time, choose one."))
+		ExitWithError(ExitBadArgs, fmt.Errorf("`--prefix` and `--from-key` cannot be set at the same time, choose one"))
+	}
+
+	if getKeysOnly && getCountOnly {
+		ExitWithError(ExitBadArgs, fmt.Errorf("`--keys-only` and `--count-only` cannot be set at the same time, choose one"))
 	}
 
 	opts := []clientv3.OpOption{}
@@ -95,7 +107,7 @@ func getGetOp(cmd *cobra.Command, args []string) (string, []clientv3.OpOption) {
 	key := args[0]
 	if len(args) > 1 {
 		if getPrefix || getFromKey {
-			ExitWithError(ExitBadArgs, fmt.Errorf("too many arguments, only accept one argument when `--prefix` or `--from-key` is set."))
+			ExitWithError(ExitBadArgs, fmt.Errorf("too many arguments, only accept one argument when `--prefix` or `--from-key` is set"))
 		}
 		opts = append(opts, clientv3.WithRange(args[1]))
 	}
@@ -157,6 +169,10 @@ func getGetOp(cmd *cobra.Command, args []string) (string, []clientv3.OpOption) {
 
 	if getKeysOnly {
 		opts = append(opts, clientv3.WithKeysOnly())
+	}
+
+	if getCountOnly {
+		opts = append(opts, clientv3.WithCountOnly())
 	}
 
 	return key, opts

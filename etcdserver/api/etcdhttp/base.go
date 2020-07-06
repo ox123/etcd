@@ -19,21 +19,13 @@ import (
 	"expvar"
 	"fmt"
 	"net/http"
-	"strings"
 
-	etcdErr "github.com/coreos/etcd/error"
-	"github.com/coreos/etcd/etcdserver"
-	"github.com/coreos/etcd/etcdserver/api"
-	"github.com/coreos/etcd/etcdserver/api/v2http/httptypes"
-	"github.com/coreos/etcd/internal/version"
-	"github.com/coreos/etcd/pkg/logutil"
-
-	"github.com/coreos/pkg/capnslog"
-)
-
-var (
-	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "etcdserver/api/etcdhttp")
-	mlog = logutil.NewMergeLogger(plog)
+	"go.etcd.io/etcd/v3/etcdserver"
+	"go.etcd.io/etcd/v3/etcdserver/api"
+	"go.etcd.io/etcd/v3/etcdserver/api/v2error"
+	"go.etcd.io/etcd/v3/etcdserver/api/v2http/httptypes"
+	"go.etcd.io/etcd/v3/version"
+	"go.uber.org/zap"
 )
 
 const (
@@ -44,10 +36,13 @@ const (
 
 // HandleBasic adds handlers to a mux for serving JSON etcd client requests
 // that do not access the v2 store.
-func HandleBasic(mux *http.ServeMux, server etcdserver.ServerPeer) {
+func HandleBasic(lg *zap.Logger, mux *http.ServeMux, server etcdserver.ServerPeer) {
+	if lg == nil {
+		lg = zap.NewNop()
+	}
 	mux.HandleFunc(varsPath, serveVars)
-	mux.HandleFunc(configPath+"/local/log", logHandleFunc)
-	HandleMetricsHealth(mux, server)
+
+	HandleMetricsHealth(lg, mux, server)
 	mux.HandleFunc(versionPath, versionHandler(server.Cluster(), serveVersion))
 }
 
@@ -74,33 +69,9 @@ func serveVersion(w http.ResponseWriter, r *http.Request, clusterV string) {
 	w.Header().Set("Content-Type", "application/json")
 	b, err := json.Marshal(&vs)
 	if err != nil {
-		plog.Panicf("cannot marshal versions to json (%v)", err)
+		panic(fmt.Sprintf("cannot marshal versions to json (%v)", err))
 	}
 	w.Write(b)
-}
-
-func logHandleFunc(w http.ResponseWriter, r *http.Request) {
-	if !allowMethod(w, r, "PUT") {
-		return
-	}
-
-	in := struct{ Level string }{}
-
-	d := json.NewDecoder(r.Body)
-	if err := d.Decode(&in); err != nil {
-		WriteError(w, r, httptypes.NewHTTPError(http.StatusBadRequest, "Invalid json body"))
-		return
-	}
-
-	logl, err := capnslog.ParseLevel(strings.ToUpper(in.Level))
-	if err != nil {
-		WriteError(w, r, httptypes.NewHTTPError(http.StatusBadRequest, "Invalid log level "+in.Level))
-		return
-	}
-
-	plog.Noticef("globalLogLevel set to %q", logl.String())
-	capnslog.SetGlobalLogLevel(logl)
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func serveVars(w http.ResponseWriter, r *http.Request) {
@@ -133,27 +104,58 @@ func allowMethod(w http.ResponseWriter, r *http.Request, m string) bool {
 // WriteError logs and writes the given Error to the ResponseWriter
 // If Error is an etcdErr, it is rendered to the ResponseWriter
 // Otherwise, it is assumed to be a StatusInternalServerError
-func WriteError(w http.ResponseWriter, r *http.Request, err error) {
+func WriteError(lg *zap.Logger, w http.ResponseWriter, r *http.Request, err error) {
 	if err == nil {
 		return
 	}
 	switch e := err.(type) {
-	case *etcdErr.Error:
+	case *v2error.Error:
 		e.WriteTo(w)
+
 	case *httptypes.HTTPError:
 		if et := e.WriteTo(w); et != nil {
-			plog.Debugf("error writing HTTPError (%v) to %s", et, r.RemoteAddr)
+			if lg != nil {
+				lg.Debug(
+					"failed to write v2 HTTP error",
+					zap.String("remote-addr", r.RemoteAddr),
+					zap.String("internal-server-error", e.Error()),
+					zap.Error(et),
+				)
+			}
 		}
+
 	default:
 		switch err {
-		case etcdserver.ErrTimeoutDueToLeaderFail, etcdserver.ErrTimeoutDueToConnectionLost, etcdserver.ErrNotEnoughStartedMembers, etcdserver.ErrUnhealthy:
-			mlog.MergeError(err)
+		case etcdserver.ErrTimeoutDueToLeaderFail, etcdserver.ErrTimeoutDueToConnectionLost, etcdserver.ErrNotEnoughStartedMembers,
+			etcdserver.ErrUnhealthy:
+			if lg != nil {
+				lg.Warn(
+					"v2 response error",
+					zap.String("remote-addr", r.RemoteAddr),
+					zap.String("internal-server-error", err.Error()),
+				)
+			}
+
 		default:
-			mlog.MergeErrorf("got unexpected response error (%v)", err)
+			if lg != nil {
+				lg.Warn(
+					"unexpected v2 response error",
+					zap.String("remote-addr", r.RemoteAddr),
+					zap.String("internal-server-error", err.Error()),
+				)
+			}
 		}
+
 		herr := httptypes.NewHTTPError(http.StatusInternalServerError, "Internal Server Error")
 		if et := herr.WriteTo(w); et != nil {
-			plog.Debugf("error writing HTTPError (%v) to %s", et, r.RemoteAddr)
+			if lg != nil {
+				lg.Debug(
+					"failed to write v2 HTTP error",
+					zap.String("remote-addr", r.RemoteAddr),
+					zap.String("internal-server-error", err.Error()),
+					zap.Error(et),
+				)
+			}
 		}
 	}
 }

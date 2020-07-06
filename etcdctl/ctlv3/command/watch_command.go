@@ -23,7 +23,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/coreos/etcd/clientv3"
+	"go.etcd.io/etcd/v3/clientv3"
 
 	"github.com/spf13/cobra"
 )
@@ -40,6 +40,7 @@ var (
 	watchPrefix      bool
 	watchInteractive bool
 	watchPrevKey     bool
+	progressNotify   bool
 )
 
 // NewWatchCommand returns the cobra command for "watch".
@@ -54,6 +55,7 @@ func NewWatchCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&watchPrefix, "prefix", false, "Watch on a prefix if prefix is set")
 	cmd.Flags().Int64Var(&watchRev, "rev", 0, "Revision to start watching")
 	cmd.Flags().BoolVar(&watchPrevKey, "prev-kv", false, "get the previous key-value pair before the event happens")
+	cmd.Flags().BoolVar(&progressNotify, "progress-notify", false, "get periodic watch progress notification from server")
 
 	return cmd
 }
@@ -101,27 +103,37 @@ func watchInteractiveFunc(cmd *cobra.Command, osArgs []string, envKey, envRange 
 		l = strings.TrimSuffix(l, "\n")
 
 		args := argify(l)
-		if len(args) < 2 && envKey == "" {
-			fmt.Fprintf(os.Stderr, "Invalid command %s (command type or key is not provided)\n", l)
+		if len(args) < 1 {
+			fmt.Fprintf(os.Stderr, "Invalid command: %s (watch and progress supported)\n", l)
 			continue
 		}
+		switch args[0] {
+		case "watch":
+			if len(args) < 2 && envKey == "" {
+				fmt.Fprintf(os.Stderr, "Invalid command %s (command type or key is not provided)\n", l)
+				continue
+			}
+			watchArgs, execArgs, perr := parseWatchArgs(osArgs, args, envKey, envRange, true)
+			if perr != nil {
+				ExitWithError(ExitBadArgs, perr)
+			}
 
-		if args[0] != "watch" {
+			ch, err := getWatchChan(c, watchArgs)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Invalid command %s (%v)\n", l, err)
+				continue
+			}
+			go printWatchCh(c, ch, execArgs)
+		case "progress":
+			err := c.RequestProgress(clientv3.WithRequireLeader(context.Background()))
+			if err != nil {
+				ExitWithError(ExitError, err)
+			}
+		default:
 			fmt.Fprintf(os.Stderr, "Invalid command %s (only support watch)\n", l)
 			continue
 		}
 
-		watchArgs, execArgs, perr := parseWatchArgs(osArgs, args, envKey, envRange, true)
-		if perr != nil {
-			ExitWithError(ExitBadArgs, perr)
-		}
-
-		ch, err := getWatchChan(c, watchArgs)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Invalid command %s (%v)\n", l, err)
-			continue
-		}
-		go printWatchCh(c, ch, execArgs)
 	}
 }
 
@@ -144,6 +156,9 @@ func getWatchChan(c *clientv3.Client, args []string) (clientv3.WatchChan, error)
 	if watchPrevKey {
 		opts = append(opts, clientv3.WithPrevKV())
 	}
+	if progressNotify {
+		opts = append(opts, clientv3.WithProgressNotify())
+	}
 	return c.Watch(clientv3.WithRequireLeader(context.Background()), key, opts...), nil
 }
 
@@ -151,6 +166,9 @@ func printWatchCh(c *clientv3.Client, ch clientv3.WatchChan, execArgs []string) 
 	for resp := range ch {
 		if resp.Canceled {
 			fmt.Fprintf(os.Stderr, "watch was canceled (%v)\n", resp.Err())
+		}
+		if resp.IsProgressNotify() {
+			fmt.Fprintf(os.Stdout, "progress notify: %d\n", resp.Header.Revision)
 		}
 		display.Watch(resp)
 
@@ -179,117 +197,158 @@ func printWatchCh(c *clientv3.Client, ch clientv3.WatchChan, execArgs []string) 
 // "--" characters are invalid arguments for "spf13/cobra" library,
 // so no need to handle such cases.
 func parseWatchArgs(osArgs, commandArgs []string, envKey, envRange string, interactive bool) (watchArgs []string, execArgs []string, err error) {
-	watchArgs = commandArgs
+	rawArgs := make([]string, len(osArgs))
+	copy(rawArgs, osArgs)
+	watchArgs = make([]string, len(commandArgs))
+	copy(watchArgs, commandArgs)
 
-	// remove preceding commands (e.g. "watch foo bar" in interactive mode)
-	idx := 0
-	for idx = range watchArgs {
-		if watchArgs[idx] == "watch" {
+	// remove preceding commands (e.g. ./bin/etcdctl watch)
+	// handle "./bin/etcdctl watch foo -- echo watch event"
+	for idx := range rawArgs {
+		if rawArgs[idx] == "watch" {
+			rawArgs = rawArgs[idx+1:]
 			break
 		}
 	}
-	if idx < len(watchArgs)-1 || envKey != "" {
-		if idx < len(watchArgs)-1 {
-			watchArgs = watchArgs[idx+1:]
-		}
 
-		execIdx, execExist := 0, false
-		for execIdx = range osArgs {
-			v := osArgs[execIdx]
-			if v == "--" && execIdx != len(osArgs)-1 {
+	// remove preceding commands (e.g. "watch foo bar" in interactive mode)
+	// handle "./bin/etcdctl watch foo -- echo watch event"
+	if interactive {
+		if watchArgs[0] != "watch" {
+			// "watch" not found
+			watchPrefix, watchRev, watchPrevKey = false, 0, false
+			return nil, nil, errBadArgsInteractiveWatch
+		}
+		watchArgs = watchArgs[1:]
+	}
+
+	execIdx, execExist := 0, false
+	if !interactive {
+		for execIdx = range rawArgs {
+			if rawArgs[execIdx] == "--" {
 				execExist = true
 				break
 			}
 		}
-
-		if idx == len(watchArgs)-1 && envKey != "" {
-			if len(watchArgs) > 0 && !interactive {
-				// "watch --rev 1 -- echo Hello World" has no conflict
-				if !execExist {
-					// "watch foo" with ETCDCTL_WATCH_KEY=foo
-					// (watchArgs==["foo"])
-					return nil, nil, errBadArgsNumConflictEnv
-				}
-			}
-			// otherwise, watch with no argument and environment key is set
-			// if interactive, first "watch" command string should be removed
-			if interactive {
-				watchArgs = []string{}
-			}
+		if execExist && execIdx == len(rawArgs)-1 {
+			// "watch foo bar --" should error
+			return nil, nil, errBadArgsNumSeparator
 		}
-
-		// "watch foo -- echo hello" with ETCDCTL_WATCH_KEY=foo
-		// (watchArgs==["foo","echo","hello"])
-		if envKey != "" && execExist {
-			widx, oidx := 0, len(osArgs)-1
-			for widx = len(watchArgs) - 1; widx >= 0; widx-- {
-				if watchArgs[widx] == osArgs[oidx] {
-					oidx--
+		// "watch" with no argument should error
+		if !execExist && len(rawArgs) < 1 && envKey == "" {
+			return nil, nil, errBadArgsNum
+		}
+		if execExist && envKey != "" {
+			// "ETCDCTL_WATCH_KEY=foo watch foo -- echo 1" should error
+			// (watchArgs==["foo","echo","1"])
+			widx, ridx := len(watchArgs)-1, len(rawArgs)-1
+			for ; widx >= 0; widx-- {
+				if watchArgs[widx] == rawArgs[ridx] {
+					ridx--
 					continue
 				}
-				if oidx == execIdx { // watchArgs has extra
+				// watchArgs has extra:
+				// ETCDCTL_WATCH_KEY=foo watch foo  --  echo 1
+				// watchArgs:                       foo echo 1
+				if ridx == execIdx {
 					return nil, nil, errBadArgsNumConflictEnv
 				}
 			}
 		}
-	} else if interactive { // "watch" not found
-		return nil, nil, errBadArgsInteractiveWatch
-	}
-	if len(watchArgs) < 1 && envKey == "" {
-		return nil, nil, errBadArgsNum
-	}
+		// check conflicting arguments
+		// e.g. "watch --rev 1 -- echo Hello World" has no conflict
+		if !execExist && len(watchArgs) > 0 && envKey != "" {
+			// "ETCDCTL_WATCH_KEY=foo watch foo" should error
+			// (watchArgs==["foo"])
+			return nil, nil, errBadArgsNumConflictEnv
+		}
+	} else {
+		for execIdx = range watchArgs {
+			if watchArgs[execIdx] == "--" {
+				execExist = true
+				break
+			}
+		}
+		if execExist && execIdx == len(watchArgs)-1 {
+			// "watch foo bar --" should error
+			watchPrefix, watchRev, watchPrevKey = false, 0, false
+			return nil, nil, errBadArgsNumSeparator
+		}
 
-	// remove preceding commands (e.g. ./bin/etcdctl watch)
-	for idx = range osArgs {
-		if osArgs[idx] == "watch" {
-			break
+		flagset := NewWatchCommand().Flags()
+		if perr := flagset.Parse(watchArgs); perr != nil {
+			watchPrefix, watchRev, watchPrevKey = false, 0, false
+			return nil, nil, perr
+		}
+		pArgs := flagset.Args()
+
+		// "watch" with no argument should error
+		if !execExist && envKey == "" && len(pArgs) < 1 {
+			watchPrefix, watchRev, watchPrevKey = false, 0, false
+			return nil, nil, errBadArgsNum
+		}
+		// check conflicting arguments
+		// e.g. "watch --rev 1 -- echo Hello World" has no conflict
+		if !execExist && len(pArgs) > 0 && envKey != "" {
+			// "ETCDCTL_WATCH_KEY=foo watch foo" should error
+			// (watchArgs==["foo"])
+			watchPrefix, watchRev, watchPrevKey = false, 0, false
+			return nil, nil, errBadArgsNumConflictEnv
 		}
 	}
-	if idx < len(osArgs)-1 {
-		osArgs = osArgs[idx+1:]
-	} else if envKey == "" {
-		return nil, nil, errBadArgsNum
-	}
 
-	argsWithSep := osArgs
-	if interactive { // interactive mode pass "--" to the command args
+	argsWithSep := rawArgs
+	if interactive {
+		// interactive mode directly passes "--" to the command args
 		argsWithSep = watchArgs
 	}
-	foundSep := false
+
+	idx, foundSep := 0, false
 	for idx = range argsWithSep {
 		if argsWithSep[idx] == "--" {
 			foundSep = true
 			break
 		}
 	}
-	if interactive {
-		flagset := NewWatchCommand().Flags()
-		if err := flagset.Parse(argsWithSep); err != nil {
-			return nil, nil, err
-		}
-		watchArgs = flagset.Args()
+	if foundSep {
+		execArgs = argsWithSep[idx+1:]
 	}
 
-	// "watch -- echo hello" with ETCDCTL_WATCH_KEY=foo
-	// should be translated to "watch foo -- echo hello"
+	if interactive {
+		flagset := NewWatchCommand().Flags()
+		if perr := flagset.Parse(argsWithSep); perr != nil {
+			return nil, nil, perr
+		}
+		watchArgs = flagset.Args()
+
+		watchPrefix, err = flagset.GetBool("prefix")
+		if err != nil {
+			return nil, nil, err
+		}
+		watchRev, err = flagset.GetInt64("rev")
+		if err != nil {
+			return nil, nil, err
+		}
+		watchPrevKey, err = flagset.GetBool("prev-kv")
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	// "ETCDCTL_WATCH_KEY=foo watch -- echo hello"
+	// should translate "watch foo -- echo hello"
 	// (watchArgs=["echo","hello"] should be ["foo","echo","hello"])
 	if envKey != "" {
-		tmp := []string{envKey}
+		ranges := []string{envKey}
 		if envRange != "" {
-			tmp = append(tmp, envRange)
+			ranges = append(ranges, envRange)
 		}
-		watchArgs = append(tmp, watchArgs...)
+		watchArgs = append(ranges, watchArgs...)
 	}
 
 	if !foundSep {
 		return watchArgs, nil, nil
 	}
-
-	if idx == len(argsWithSep)-1 {
-		// "watch foo bar --" should error
-		return nil, nil, errBadArgsNumSeparator
-	}
-	execArgs = argsWithSep[idx+1:]
 
 	// "watch foo bar --rev 1 -- echo hello" or "watch foo --rev 1 bar -- echo hello",
 	// then "watchArgs" is "foo bar echo hello"

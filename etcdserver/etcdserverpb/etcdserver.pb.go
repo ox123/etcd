@@ -39,11 +39,15 @@
 		WatchRequest
 		WatchCreateRequest
 		WatchCancelRequest
+		WatchProgressRequest
 		WatchResponse
 		LeaseGrantRequest
 		LeaseGrantResponse
 		LeaseRevokeRequest
 		LeaseRevokeResponse
+		LeaseCheckpoint
+		LeaseCheckpointRequest
+		LeaseCheckpointResponse
 		LeaseKeepAliveRequest
 		LeaseKeepAliveResponse
 		LeaseTimeToLiveRequest
@@ -60,6 +64,8 @@
 		MemberUpdateResponse
 		MemberListRequest
 		MemberListResponse
+		MemberPromoteRequest
+		MemberPromoteResponse
 		DefragmentRequest
 		DefragmentResponse
 		MoveLeaderRequest
@@ -67,10 +73,13 @@
 		AlarmRequest
 		AlarmMember
 		AlarmResponse
+		DowngradeRequest
+		DowngradeResponse
 		StatusRequest
 		StatusResponse
 		AuthEnableRequest
 		AuthDisableRequest
+		AuthStatusRequest
 		AuthenticateRequest
 		AuthUserAddRequest
 		AuthUserGetRequest
@@ -87,6 +96,7 @@
 		AuthRoleRevokePermissionRequest
 		AuthEnableResponse
 		AuthDisableResponse
+		AuthStatusResponse
 		AuthenticateResponse
 		AuthUserAddResponse
 		AuthUserGetResponse

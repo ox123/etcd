@@ -18,11 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/clientv3/naming"
-	"github.com/coreos/etcd/integration"
-	"github.com/coreos/etcd/pkg/testutil"
+	"go.etcd.io/etcd/v3/clientv3"
+	"go.etcd.io/etcd/v3/clientv3/naming"
+	"go.etcd.io/etcd/v3/integration"
+	"go.etcd.io/etcd/v3/pkg/testutil"
 
+	"go.uber.org/zap"
 	gnaming "google.golang.org/grpc/naming"
 )
 
@@ -44,7 +45,7 @@ func TestRegister(t *testing.T) {
 		t.Fatalf("len(ups) expected 0, got %d (%v)", len(ups), ups)
 	}
 
-	donec := Register(cli, testPrefix, paddr, 5)
+	donec := Register(zap.NewExample(), cli, testPrefix, paddr, 5)
 
 	ups, err = wa.Next()
 	if err != nil {

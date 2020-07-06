@@ -18,8 +18,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/coreos/etcd/client"
 	"github.com/urfave/cli"
+	"go.etcd.io/etcd/v3/client"
 )
 
 // NewUpdateDirCommand returns the CLI command for "updatedir".

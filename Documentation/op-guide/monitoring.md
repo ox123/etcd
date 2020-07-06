@@ -1,4 +1,6 @@
-# Monitoring etcd
+---
+title: Monitoring etcd
+---
 
 Each etcd server provides local monitoring information on its client port through http endpoints. The monitoring data is useful for both system health checking and cluster debugging.
 
@@ -43,7 +45,7 @@ When	Elapsed (s)
 
 ## Metrics endpoint
 
-Each etcd server exports metrics under the `/metrics` path on its client port and optionally on interfaces given by `--listen-metrics-urls`.
+Each etcd server exports metrics under the `/metrics` path on its client port and optionally on locations given by `--listen-metrics-urls`.
 
 The metrics can be fetched with `curl`:
 
@@ -58,6 +60,10 @@ etcd_disk_backend_commit_duration_seconds_bucket{le="0.008"} 405979
 etcd_disk_backend_commit_duration_seconds_bucket{le="0.016"} 406464
 ...
 ```
+
+## Health Check
+
+Since v3.3.0, in addition to responding to the `/metrics` endpoint, any locations specified by `--listen-metrics-urls` will also respond to the `/health` endpoint. This can be useful if the standard endpoint is configured with mutual (client) TLS authentication, but a load balancer or monitoring service still needs access to the health check.
 
 ## Prometheus
 
@@ -117,8 +123,6 @@ Access: proxy
 
 Then import the default [etcd dashboard template][template] and customize. For instance, if Prometheus data source name is `my-etcd`, the `datasource` field values in JSON also need to be `my-etcd`.
 
-See the [demo][demo].
-
 Sample dashboard:
 
 ![](./etcd-sample-grafana.png)
@@ -127,4 +131,3 @@ Sample dashboard:
 [prometheus]: https://prometheus.io/
 [grafana]: http://grafana.org/
 [template]: ./grafana.json
-[demo]: http://dash.etcd.io/dashboard/db/test-etcd-kubernetes

@@ -17,10 +17,10 @@ package command
 import (
 	"fmt"
 
-	v3 "github.com/coreos/etcd/clientv3"
-	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	spb "github.com/coreos/etcd/internal/mvcc/mvccpb"
-	"github.com/coreos/etcd/snapshot"
+	v3 "go.etcd.io/etcd/v3/clientv3"
+	"go.etcd.io/etcd/v3/clientv3/snapshot"
+	pb "go.etcd.io/etcd/v3/etcdserver/etcdserverpb"
+	spb "go.etcd.io/etcd/v3/mvcc/mvccpb"
 )
 
 type fieldsPrinter struct{ printer }
@@ -137,6 +137,17 @@ func (p *fieldsPrinter) MemberList(r v3.MemberListResponse) {
 		for _, u := range m.ClientURLs {
 			fmt.Printf("\"ClientURL\" : %q\n", u)
 		}
+		fmt.Println(`"IsLearner" :`, m.IsLearner)
+		fmt.Println()
+	}
+}
+
+func (p *fieldsPrinter) EndpointHealth(hs []epHealth) {
+	for _, h := range hs {
+		fmt.Printf("\"Endpoint\" : %q\n", h.Ep)
+		fmt.Println(`"Health" :`, h.Health)
+		fmt.Println(`"Took" :`, h.Took)
+		fmt.Println(`"Error" :`, h.Error)
 		fmt.Println()
 	}
 }
@@ -147,6 +158,7 @@ func (p *fieldsPrinter) EndpointStatus(eps []epStatus) {
 		fmt.Printf("\"Version\" : %q\n", ep.Resp.Version)
 		fmt.Println(`"DBSize" :`, ep.Resp.DbSize)
 		fmt.Println(`"Leader" :`, ep.Resp.Leader)
+		fmt.Println(`"IsLearner" :`, ep.Resp.IsLearner)
 		fmt.Println(`"RaftIndex" :`, ep.Resp.RaftIndex)
 		fmt.Println(`"RaftTerm" :`, ep.Resp.RaftTerm)
 		fmt.Println(`"RaftAppliedIndex" :`, ep.Resp.RaftAppliedIndex)

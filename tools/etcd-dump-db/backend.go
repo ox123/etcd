@@ -17,13 +17,15 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"go.etcd.io/etcd/v3/auth/authpb"
 	"path/filepath"
 
-	bolt "github.com/coreos/bbolt"
-	"github.com/coreos/etcd/internal/lease/leasepb"
-	"github.com/coreos/etcd/internal/mvcc"
-	"github.com/coreos/etcd/internal/mvcc/backend"
-	"github.com/coreos/etcd/internal/mvcc/mvccpb"
+	"go.etcd.io/etcd/v3/lease/leasepb"
+	"go.etcd.io/etcd/v3/mvcc"
+	"go.etcd.io/etcd/v3/mvcc/backend"
+	"go.etcd.io/etcd/v3/mvcc/mvccpb"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 func snapDir(dataDir string) string {
@@ -31,9 +33,9 @@ func snapDir(dataDir string) string {
 }
 
 func getBuckets(dbPath string) (buckets []string, err error) {
-	db, derr := bolt.Open(dbPath, 0600, &bolt.Options{})
+	db, derr := bolt.Open(dbPath, 0600, &bolt.Options{Timeout: flockTimeout})
 	if derr != nil {
-		return nil, derr
+		return nil, fmt.Errorf("failed to open bolt DB %v", derr)
 	}
 	defer db.Close()
 
@@ -51,8 +53,11 @@ func getBuckets(dbPath string) (buckets []string, err error) {
 type decoder func(k, v []byte)
 
 var decoders = map[string]decoder{
-	"key":   keyDecoder,
-	"lease": leaseDecoder,
+	"key":       keyDecoder,
+	"lease":     leaseDecoder,
+	"auth":      authDecoder,
+	"authRoles": authRolesDecoder,
+	"authUsers": authUsersDecoder,
 }
 
 type revision struct {
@@ -92,10 +97,37 @@ func leaseDecoder(k, v []byte) {
 	fmt.Printf("lease ID=%016x, TTL=%ds\n", leaseID, lpb.TTL)
 }
 
+func authDecoder(k, v []byte) {
+	if string(k) == "authRevision" {
+		rev := binary.BigEndian.Uint64(v)
+		fmt.Printf("key=%q, value=%v\n", k, rev)
+	} else {
+		fmt.Printf("key=%q, value=%v\n", k, v)
+	}
+}
+
+func authRolesDecoder(k, v []byte) {
+	role := &authpb.Role{}
+	err := role.Unmarshal(v)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("role=%q, keyPermission=%v\n", string(role.Name), role.KeyPermission)
+}
+
+func authUsersDecoder(k, v []byte) {
+	user := &authpb.User{}
+	err := user.Unmarshal(v)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("user=%q, roles=%q, password=%q, option=%v\n", user.Name, user.Roles, string(user.Password), user.Options)
+}
+
 func iterateBucket(dbPath, bucket string, limit uint64, decode bool) (err error) {
-	db, derr := bolt.Open(dbPath, 0600, &bolt.Options{})
-	if derr != nil {
-		return derr
+	db, err := bolt.Open(dbPath, 0600, &bolt.Options{Timeout: flockTimeout})
+	if err != nil {
+		return fmt.Errorf("failed to open bolt DB %v", err)
 	}
 	defer db.Close()
 
@@ -110,7 +142,7 @@ func iterateBucket(dbPath, bucket string, limit uint64, decode bool) (err error)
 		// iterate in reverse order (use First() and Next() for ascending order)
 		for k, v := c.Last(); k != nil; k, v = c.Prev() {
 			// TODO: remove sensitive information
-			// (https://github.com/coreos/etcd/issues/7620)
+			// (https://github.com/etcd-io/etcd/issues/7620)
 			if dec, ok := decoders[bucket]; decode && ok {
 				dec(k, v)
 			} else {

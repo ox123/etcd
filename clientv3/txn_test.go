@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/pkg/testutil"
+	"go.etcd.io/etcd/v3/pkg/testutil"
 )
 
 func TestTxnPanics(t *testing.T) {
@@ -26,7 +26,7 @@ func TestTxnPanics(t *testing.T) {
 
 	kv := &kv{}
 
-	errc := make(chan string)
+	errc := make(chan string, 1)
 	df := func() {
 		if s := recover(); s != nil {
 			errc <- s.(string)

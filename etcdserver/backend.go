@@ -19,16 +19,32 @@ import (
 	"os"
 	"time"
 
-	"github.com/coreos/etcd/internal/lease"
-	"github.com/coreos/etcd/internal/mvcc"
-	"github.com/coreos/etcd/internal/mvcc/backend"
-	"github.com/coreos/etcd/internal/raftsnap"
-	"github.com/coreos/etcd/raft/raftpb"
+	"go.etcd.io/etcd/v3/etcdserver/api/snap"
+	"go.etcd.io/etcd/v3/etcdserver/cindex"
+	"go.etcd.io/etcd/v3/mvcc/backend"
+	"go.etcd.io/etcd/v3/raft/raftpb"
+
+	"go.uber.org/zap"
 )
 
 func newBackend(cfg ServerConfig) backend.Backend {
 	bcfg := backend.DefaultBackendConfig()
 	bcfg.Path = cfg.backendPath()
+	bcfg.UnsafeNoFsync = cfg.UnsafeNoFsync
+	if cfg.BackendBatchLimit != 0 {
+		bcfg.BatchLimit = cfg.BackendBatchLimit
+		if cfg.Logger != nil {
+			cfg.Logger.Info("setting backend batch limit", zap.Int("batch limit", cfg.BackendBatchLimit))
+		}
+	}
+	if cfg.BackendBatchInterval != 0 {
+		bcfg.BatchInterval = cfg.BackendBatchInterval
+		if cfg.Logger != nil {
+			cfg.Logger.Info("setting backend batch interval", zap.Duration("batch interval", cfg.BackendBatchInterval))
+		}
+	}
+	bcfg.BackendFreelistType = cfg.BackendFreelistType
+	bcfg.Logger = cfg.Logger
 	if cfg.QuotaBackendBytes > 0 && cfg.QuotaBackendBytes != DefaultQuotaBytes {
 		// permit 10% excess over quota for disarm
 		bcfg.MmapSize = uint64(cfg.QuotaBackendBytes + cfg.QuotaBackendBytes/10)
@@ -37,13 +53,13 @@ func newBackend(cfg ServerConfig) backend.Backend {
 }
 
 // openSnapshotBackend renames a snapshot db to the current etcd db and opens it.
-func openSnapshotBackend(cfg ServerConfig, ss *raftsnap.Snapshotter, snapshot raftpb.Snapshot) (backend.Backend, error) {
+func openSnapshotBackend(cfg ServerConfig, ss *snap.Snapshotter, snapshot raftpb.Snapshot) (backend.Backend, error) {
 	snapPath, err := ss.DBFilePath(snapshot.Metadata.Index)
 	if err != nil {
-		return nil, fmt.Errorf("database snapshot file path error: %v", err)
+		return nil, fmt.Errorf("failed to find database snapshot file (%v)", err)
 	}
 	if err := os.Rename(snapPath, cfg.backendPath()); err != nil {
-		return nil, fmt.Errorf("rename snapshot file error: %v", err)
+		return nil, fmt.Errorf("failed to rename database snapshot file (%v)", err)
 	}
 	return openBackend(cfg), nil
 }
@@ -51,17 +67,25 @@ func openSnapshotBackend(cfg ServerConfig, ss *raftsnap.Snapshotter, snapshot ra
 // openBackend returns a backend using the current etcd db.
 func openBackend(cfg ServerConfig) backend.Backend {
 	fn := cfg.backendPath()
-	beOpened := make(chan backend.Backend)
+
+	now, beOpened := time.Now(), make(chan backend.Backend)
 	go func() {
 		beOpened <- newBackend(cfg)
 	}()
+
 	select {
 	case be := <-beOpened:
+		cfg.Logger.Info("opened backend db", zap.String("path", fn), zap.Duration("took", time.Since(now)))
 		return be
+
 	case <-time.After(10 * time.Second):
-		plog.Warningf("another etcd process is using %q and holds the file lock, or loading backend file is taking >10 seconds", fn)
-		plog.Warningf("waiting for it to exit before starting...")
+		cfg.Logger.Info(
+			"db file is flocked by another process, or taking too long",
+			zap.String("path", fn),
+			zap.Duration("took", time.Since(now)),
+		)
 	}
+
 	return <-beOpened
 }
 
@@ -69,13 +93,15 @@ func openBackend(cfg ServerConfig) backend.Backend {
 // before updating the backend db after persisting raft snapshot to disk,
 // violating the invariant snapshot.Metadata.Index < db.consistentIndex. In this
 // case, replace the db with the snapshot db sent by the leader.
-func recoverSnapshotBackend(cfg ServerConfig, oldbe backend.Backend, snapshot raftpb.Snapshot) (backend.Backend, error) {
-	var cIndex consistentIndex
-	kv := mvcc.New(oldbe, &lease.FakeLessor{}, &cIndex)
-	defer kv.Close()
-	if snapshot.Metadata.Index <= kv.ConsistentIndex() {
+func recoverSnapshotBackend(cfg ServerConfig, oldbe backend.Backend, snapshot raftpb.Snapshot, beExist bool) (backend.Backend, error) {
+	consistentIndex := uint64(0)
+	if beExist {
+		ci := cindex.NewConsistentIndex(oldbe.BatchTx())
+		consistentIndex = ci.ConsistentIndex()
+	}
+	if snapshot.Metadata.Index <= consistentIndex {
 		return oldbe, nil
 	}
 	oldbe.Close()
-	return openSnapshotBackend(cfg, raftsnap.New(cfg.SnapDir()), snapshot)
+	return openSnapshotBackend(cfg, snap.New(cfg.Logger, cfg.SnapDir()), snapshot)
 }

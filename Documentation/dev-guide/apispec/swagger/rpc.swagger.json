@@ -5,10 +5,6 @@
   "produces": [
     "application/json"
   ],
-  "schemes": [
-    "http",
-    "https"
-  ],
   "swagger": "2.0",
   "info": {
     "title": "etcdserver/etcdserverpb/rpc.proto",
@@ -34,9 +30,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthenticateResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -61,9 +63,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthDisableResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -88,9 +96,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthEnableResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -101,7 +115,7 @@
         "tags": [
           "Auth"
         ],
-        "summary": "RoleAdd adds a new role.",
+        "summary": "RoleAdd adds a new role. Role name cannot be empty.",
         "operationId": "RoleAdd",
         "parameters": [
           {
@@ -115,9 +129,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthRoleAddResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -142,9 +162,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthRoleDeleteResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -169,9 +195,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthRoleGetResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -196,9 +228,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthRoleGrantPermissionResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -223,9 +261,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthRoleListResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -250,9 +294,48 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthRoleRevokePermissionResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        }
+      }
+    },
+    "/v3/auth/status": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "AuthStatus displays authentication status.",
+        "operationId": "AuthStatus",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbAuthStatusRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbAuthStatusResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -263,7 +346,7 @@
         "tags": [
           "Auth"
         ],
-        "summary": "UserAdd adds a new user.",
+        "summary": "UserAdd adds a new user. User name cannot be empty.",
         "operationId": "UserAdd",
         "parameters": [
           {
@@ -277,9 +360,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthUserAddResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -304,9 +393,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthUserChangePasswordResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -331,9 +426,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthUserDeleteResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -358,9 +459,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthUserGetResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -385,9 +492,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthUserGrantRoleResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -412,9 +525,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthUserListResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -439,9 +558,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAuthUserRevokeRoleResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -466,9 +591,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbMemberAddResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -493,9 +624,48 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbMemberListResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        }
+      }
+    },
+    "/v3/cluster/member/promote": {
+      "post": {
+        "tags": [
+          "Cluster"
+        ],
+        "summary": "MemberPromote promotes a member from raft learner (non-voting) to raft voting member.",
+        "operationId": "MemberPromote",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbMemberPromoteRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbMemberPromoteResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -520,9 +690,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbMemberRemoveResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -547,9 +723,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbMemberUpdateResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -574,9 +756,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbCompactionResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -601,9 +789,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbDeleteRangeResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -615,7 +809,7 @@
           "Lease"
         ],
         "summary": "LeaseLeases lists all existing leases.",
-        "operationId": "LeaseLeases",
+        "operationId": "LeaseLeases2",
         "parameters": [
           {
             "name": "body",
@@ -628,9 +822,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbLeaseLeasesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -642,7 +842,7 @@
           "Lease"
         ],
         "summary": "LeaseRevoke revokes a lease. All keys attached to the lease will expire and be deleted.",
-        "operationId": "LeaseRevoke",
+        "operationId": "LeaseRevoke2",
         "parameters": [
           {
             "name": "body",
@@ -655,9 +855,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbLeaseRevokeResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -669,7 +875,7 @@
           "Lease"
         ],
         "summary": "LeaseTimeToLive retrieves lease information.",
-        "operationId": "LeaseTimeToLive",
+        "operationId": "LeaseTimeToLive2",
         "parameters": [
           {
             "name": "body",
@@ -682,9 +888,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbLeaseTimeToLiveResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -709,9 +921,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbPutResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -736,9 +954,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbRangeResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -763,9 +987,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbTxnResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -790,9 +1020,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbLeaseGrantResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -807,7 +1043,7 @@
         "operationId": "LeaseKeepAlive",
         "parameters": [
           {
-            "description": "(streaming inputs)",
+            "description": " (streaming inputs)",
             "name": "body",
             "in": "body",
             "required": true,
@@ -818,9 +1054,123 @@
         ],
         "responses": {
           "200": {
-            "description": "(streaming responses)",
+            "description": "A successful response.(streaming responses)",
             "schema": {
-              "$ref": "#/definitions/etcdserverpbLeaseKeepAliveResponse"
+              "type": "object",
+              "title": "Stream result of etcdserverpbLeaseKeepAliveResponse",
+              "properties": {
+                "error": {
+                  "$ref": "#/definitions/runtimeStreamError"
+                },
+                "result": {
+                  "$ref": "#/definitions/etcdserverpbLeaseKeepAliveResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        }
+      }
+    },
+    "/v3/lease/leases": {
+      "post": {
+        "tags": [
+          "Lease"
+        ],
+        "summary": "LeaseLeases lists all existing leases.",
+        "operationId": "LeaseLeases",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbLeaseLeasesRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbLeaseLeasesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        }
+      }
+    },
+    "/v3/lease/revoke": {
+      "post": {
+        "tags": [
+          "Lease"
+        ],
+        "summary": "LeaseRevoke revokes a lease. All keys attached to the lease will expire and be deleted.",
+        "operationId": "LeaseRevoke",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbLeaseRevokeRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbLeaseRevokeResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        }
+      }
+    },
+    "/v3/lease/timetolive": {
+      "post": {
+        "tags": [
+          "Lease"
+        ],
+        "summary": "LeaseTimeToLive retrieves lease information.",
+        "operationId": "LeaseTimeToLive",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbLeaseTimeToLiveRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbLeaseTimeToLiveResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -845,9 +1195,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbAlarmResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -872,9 +1228,48 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbDefragmentResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        }
+      }
+    },
+    "/v3/maintenance/downgrade": {
+      "post": {
+        "tags": [
+          "Maintenance"
+        ],
+        "summary": "Downgrade requests downgrade, cancel downgrade on the cluster version.",
+        "operationId": "Downgrade",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbDowngradeRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/etcdserverpbDowngradeResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -885,7 +1280,7 @@
         "tags": [
           "Maintenance"
         ],
-        "summary": "HashKV computes the hash of all MVCC keys up to a given revision.",
+        "summary": "HashKV computes the hash of all MVCC keys up to a given revision.\nIt only iterates \"key\" bucket in backend storage.",
         "operationId": "HashKV",
         "parameters": [
           {
@@ -899,9 +1294,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbHashKVResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -926,9 +1327,24 @@
         ],
         "responses": {
           "200": {
-            "description": "(streaming responses)",
+            "description": "A successful response.(streaming responses)",
             "schema": {
-              "$ref": "#/definitions/etcdserverpbSnapshotResponse"
+              "type": "object",
+              "title": "Stream result of etcdserverpbSnapshotResponse",
+              "properties": {
+                "error": {
+                  "$ref": "#/definitions/runtimeStreamError"
+                },
+                "result": {
+                  "$ref": "#/definitions/etcdserverpbSnapshotResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -953,9 +1369,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbStatusResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -980,9 +1402,15 @@
         ],
         "responses": {
           "200": {
-            "description": "(empty)",
+            "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/etcdserverpbMoveLeaderResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -997,7 +1425,7 @@
         "operationId": "Watch",
         "parameters": [
           {
-            "description": "(streaming inputs)",
+            "description": " (streaming inputs)",
             "name": "body",
             "in": "body",
             "required": true,
@@ -1008,9 +1436,24 @@
         ],
         "responses": {
           "200": {
-            "description": "(streaming responses)",
+            "description": "A successful response.(streaming responses)",
             "schema": {
-              "$ref": "#/definitions/etcdserverpbWatchResponse"
+              "type": "object",
+              "title": "Stream result of etcdserverpbWatchResponse",
+              "properties": {
+                "error": {
+                  "$ref": "#/definitions/runtimeStreamError"
+                },
+                "result": {
+                  "$ref": "#/definitions/etcdserverpbWatchResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
             }
           }
         }
@@ -1046,6 +1489,15 @@
         "MOD",
         "VALUE",
         "LEASE"
+      ]
+    },
+    "DowngradeRequestDowngradeAction": {
+      "type": "string",
+      "default": "VALIDATE",
+      "enum": [
+        "VALIDATE",
+        "ENABLE",
+        "CANCEL"
       ]
     },
     "EventEventType": {
@@ -1110,6 +1562,15 @@
         "WRITE",
         "READWRITE"
       ]
+    },
+    "authpbUserAddOptions": {
+      "type": "object",
+      "properties": {
+        "no_password": {
+          "type": "boolean",
+          "format": "boolean"
+        }
+      }
     },
     "etcdserverpbAlarmMember": {
       "type": "object",
@@ -1286,10 +1747,12 @@
       "type": "object",
       "properties": {
         "key": {
-          "type": "string"
+          "type": "string",
+          "format": "byte"
         },
         "range_end": {
-          "type": "string"
+          "type": "string",
+          "format": "byte"
         },
         "role": {
           "type": "string"
@@ -1304,11 +1767,34 @@
         }
       }
     },
+    "etcdserverpbAuthStatusRequest": {
+      "type": "object"
+    },
+    "etcdserverpbAuthStatusResponse": {
+      "type": "object",
+      "properties": {
+        "authRevision": {
+          "type": "string",
+          "format": "uint64",
+          "title": "authRevision is the current revision of auth store"
+        },
+        "enabled": {
+          "type": "boolean",
+          "format": "boolean"
+        },
+        "header": {
+          "$ref": "#/definitions/etcdserverpbResponseHeader"
+        }
+      }
+    },
     "etcdserverpbAuthUserAddRequest": {
       "type": "object",
       "properties": {
         "name": {
           "type": "string"
+        },
+        "options": {
+          "$ref": "#/definitions/authpbUserAddOptions"
         },
         "password": {
           "type": "string"
@@ -1586,6 +2072,31 @@
         }
       }
     },
+    "etcdserverpbDowngradeRequest": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "action is the kind of downgrade request to issue. The action may\nVALIDATE the target version, DOWNGRADE the cluster version,\nor CANCEL the current downgrading job.",
+          "$ref": "#/definitions/DowngradeRequestDowngradeAction"
+        },
+        "version": {
+          "description": "version is the target version to downgrade.",
+          "type": "string"
+        }
+      }
+    },
+    "etcdserverpbDowngradeResponse": {
+      "type": "object",
+      "properties": {
+        "header": {
+          "$ref": "#/definitions/etcdserverpbResponseHeader"
+        },
+        "version": {
+          "description": "version is the current cluster version.",
+          "type": "string"
+        }
+      }
+    },
     "etcdserverpbHashKVRequest": {
       "type": "object",
       "properties": {
@@ -1799,6 +2310,11 @@
             "type": "string"
           }
         },
+        "isLearner": {
+          "description": "isLearner indicates if the member is raft learner.",
+          "type": "boolean",
+          "format": "boolean"
+        },
         "name": {
           "description": "name is the human-readable name of the member. If the member is not started, the name will be an empty string.",
           "type": "string"
@@ -1815,6 +2331,11 @@
     "etcdserverpbMemberAddRequest": {
       "type": "object",
       "properties": {
+        "isLearner": {
+          "description": "isLearner indicates if the added member is raft learner.",
+          "type": "boolean",
+          "format": "boolean"
+        },
         "peerURLs": {
           "description": "peerURLs is the list of URLs the added member will use to communicate with the cluster.",
           "type": "array",
@@ -1844,7 +2365,13 @@
       }
     },
     "etcdserverpbMemberListRequest": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "linearizable": {
+          "type": "boolean",
+          "format": "boolean"
+        }
+      }
     },
     "etcdserverpbMemberListResponse": {
       "type": "object",
@@ -1854,6 +2381,31 @@
         },
         "members": {
           "description": "members is a list of all members associated with the cluster.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/etcdserverpbMember"
+          }
+        }
+      }
+    },
+    "etcdserverpbMemberPromoteRequest": {
+      "type": "object",
+      "properties": {
+        "ID": {
+          "description": "ID is the member ID of the member to promote.",
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "etcdserverpbMemberPromoteResponse": {
+      "type": "object",
+      "properties": {
+        "header": {
+          "$ref": "#/definitions/etcdserverpbResponseHeader"
+        },
+        "members": {
+          "description": "members is a list of all members after promoting the member.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/etcdserverpbMember"
@@ -2017,7 +2569,7 @@
           "format": "int64"
         },
         "min_create_revision": {
-          "description": "min_create_revision is the lower bound for returned key create revisions; all keys with\nlesser create trevisions will be filtered away.",
+          "description": "min_create_revision is the lower bound for returned key create revisions; all keys with\nlesser create revisions will be filtered away.",
           "type": "string",
           "format": "int64"
         },
@@ -2112,7 +2664,7 @@
           "format": "uint64"
         },
         "revision": {
-          "description": "revision is the key-value store revision when the request was applied.",
+          "description": "revision is the key-value store revision when the request was applied.\nFor watch progress responses, the header.revision indicates progress. All future events\nrecieved in this stream are guaranteed to have a higher revision number than the\nheader.revision number.",
           "type": "string",
           "format": "int64"
         }
@@ -2183,6 +2735,11 @@
         "header": {
           "$ref": "#/definitions/etcdserverpbResponseHeader"
         },
+        "isLearner": {
+          "description": "isLearner indicates if the member is raft learner.",
+          "type": "boolean",
+          "format": "boolean"
+        },
         "leader": {
           "description": "leader is the member ID which the responding member believes is the current leader.",
           "type": "string",
@@ -2194,7 +2751,7 @@
           "format": "uint64"
         },
         "raftIndex": {
-          "description": "raftIndex is the current raft index of the responding member.",
+          "description": "raftIndex is the current raft committed index of the responding member.",
           "type": "string",
           "format": "uint64"
         },
@@ -2276,6 +2833,11 @@
             "$ref": "#/definitions/WatchCreateRequestFilterType"
           }
         },
+        "fragment": {
+          "description": "fragment enables splitting large revisions into multiple watch responses.",
+          "type": "boolean",
+          "format": "boolean"
+        },
         "key": {
           "description": "key is the key to register for watching.",
           "type": "string",
@@ -2308,6 +2870,10 @@
         }
       }
     },
+    "etcdserverpbWatchProgressRequest": {
+      "description": "Requests the a watch stream progress status be sent in the watch response stream as soon as\npossible.",
+      "type": "object"
+    },
     "etcdserverpbWatchRequest": {
       "type": "object",
       "properties": {
@@ -2316,6 +2882,9 @@
         },
         "create_request": {
           "$ref": "#/definitions/etcdserverpbWatchCreateRequest"
+        },
+        "progress_request": {
+          "$ref": "#/definitions/etcdserverpbWatchProgressRequest"
         }
       }
     },
@@ -2346,6 +2915,11 @@
           "items": {
             "$ref": "#/definitions/mvccpbEvent"
           }
+        },
+        "fragment": {
+          "description": "framgment is true if large watch response was split over multiple responses.",
+          "type": "boolean",
+          "format": "boolean"
         },
         "header": {
           "$ref": "#/definitions/etcdserverpbResponseHeader"
@@ -2406,6 +2980,64 @@
           "description": "version is the version of the key. A deletion resets\nthe version to zero and any modification of the key\nincreases its version.",
           "type": "string",
           "format": "int64"
+        }
+      }
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "type_url": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "runtimeError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/protobufAny"
+          }
+        },
+        "error": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "runtimeStreamError": {
+      "type": "object",
+      "properties": {
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/protobufAny"
+          }
+        },
+        "grpc_code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "http_code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "http_status": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
         }
       }
     }

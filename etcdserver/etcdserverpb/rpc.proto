@@ -2,8 +2,8 @@ syntax = "proto3";
 package etcdserverpb;
 
 import "gogoproto/gogo.proto";
-import "etcd/internal/mvcc/mvccpb/kv.proto";
-import "etcd/internal/auth/authpb/auth.proto";
+import "etcd/mvcc/mvccpb/kv.proto";
+import "etcd/auth/authpb/auth.proto";
 
 // for grpc-gateway
 import "google/api/annotations.proto";
@@ -90,8 +90,12 @@ service Lease {
   // LeaseRevoke revokes a lease. All keys attached to the lease will expire and be deleted.
   rpc LeaseRevoke(LeaseRevokeRequest) returns (LeaseRevokeResponse) {
       option (google.api.http) = {
-        post: "/v3/kv/lease/revoke"
+        post: "/v3/lease/revoke"
         body: "*"
+        additional_bindings {
+            post: "/v3/kv/lease/revoke"
+            body: "*"
+        }
     };
   }
 
@@ -107,16 +111,24 @@ service Lease {
   // LeaseTimeToLive retrieves lease information.
   rpc LeaseTimeToLive(LeaseTimeToLiveRequest) returns (LeaseTimeToLiveResponse) {
       option (google.api.http) = {
-        post: "/v3/kv/lease/timetolive"
+        post: "/v3/lease/timetolive"
         body: "*"
+        additional_bindings {
+            post: "/v3/kv/lease/timetolive"
+            body: "*"
+        }
     };
   }
 
   // LeaseLeases lists all existing leases.
   rpc LeaseLeases(LeaseLeasesRequest) returns (LeaseLeasesResponse) {
       option (google.api.http) = {
-        post: "/v3/kv/lease/leases"
+        post: "/v3/lease/leases"
         body: "*"
+        additional_bindings {
+            post: "/v3/kv/lease/leases"
+            body: "*"
+        }
     };
   }
 }
@@ -153,6 +165,14 @@ service Cluster {
         body: "*"
     };
   }
+
+  // MemberPromote promotes a member from raft learner (non-voting) to raft voting member.
+  rpc MemberPromote(MemberPromoteRequest) returns (MemberPromoteResponse) {
+      option (google.api.http) = {
+        post: "/v3/cluster/member/promote"
+        body: "*"
+    };
+  }
 }
 
 service Maintenance {
@@ -180,9 +200,12 @@ service Maintenance {
     };
   }
 
-  // Hash computes the hash of the KV's backend.
-  // This is designed for testing; do not use this in production when there
-  // are ongoing transactions.
+  // Hash computes the hash of whole backend keyspace,
+  // including key, lease, and other buckets in storage.
+  // This is designed for testing ONLY!
+  // Do not rely on this in production with ongoing transactions,
+  // since Hash operation does not hold MVCC locks.
+  // Use "HashKV" API instead for "key" bucket consistency checks.
   rpc Hash(HashRequest) returns (HashResponse) {
       option (google.api.http) = {
         post: "/v3/maintenance/hash"
@@ -191,6 +214,7 @@ service Maintenance {
   }
 
   // HashKV computes the hash of all MVCC keys up to a given revision.
+  // It only iterates "key" bucket in backend storage.
   rpc HashKV(HashKVRequest) returns (HashKVResponse) {
       option (google.api.http) = {
         post: "/v3/maintenance/hash"
@@ -213,6 +237,14 @@ service Maintenance {
         body: "*"
     };
   }
+
+  // Downgrade requests downgrade, cancel downgrade on the cluster version.
+  rpc Downgrade(DowngradeRequest) returns (DowngradeResponse) {
+    option (google.api.http) = {
+      post: "/v3/maintenance/downgrade"
+      body: "*"
+    };
+  }
 }
 
 service Auth {
@@ -232,6 +264,14 @@ service Auth {
     };
   }
 
+  // AuthStatus displays authentication status.
+  rpc AuthStatus(AuthStatusRequest) returns (AuthStatusResponse) {
+      option (google.api.http) = {
+        post: "/v3/auth/status"
+        body: "*"
+    };
+  }
+
   // Authenticate processes an authenticate request.
   rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse) {
       option (google.api.http) = {
@@ -240,7 +280,7 @@ service Auth {
     };
   }
 
-  // UserAdd adds a new user.
+  // UserAdd adds a new user. User name cannot be empty.
   rpc UserAdd(AuthUserAddRequest) returns (AuthUserAddResponse) {
       option (google.api.http) = {
         post: "/v3/auth/user/add"
@@ -296,7 +336,7 @@ service Auth {
     };
   }
 
-  // RoleAdd adds a new role.
+  // RoleAdd adds a new role. Role name cannot be empty.
   rpc RoleAdd(AuthRoleAddRequest) returns (AuthRoleAddResponse) {
       option (google.api.http) = {
         post: "/v3/auth/role/add"
@@ -351,6 +391,9 @@ message ResponseHeader {
   // member_id is the ID of the member which sent the response.
   uint64 member_id = 2;
   // revision is the key-value store revision when the request was applied.
+  // For watch progress responses, the header.revision indicates progress. All future events
+  // recieved in this stream are guaranteed to have a higher revision number than the
+  // header.revision number.
   int64 revision = 3;
   // raft_term is the raft term when the request was applied.
   uint64 raft_term = 4;
@@ -415,7 +458,7 @@ message RangeRequest {
   int64 max_mod_revision = 11;
 
   // min_create_revision is the lower bound for returned key create revisions; all keys with
-  // lesser create trevisions will be filtered away.
+  // lesser create revisions will be filtered away.
   int64 min_create_revision = 12;
 
   // max_create_revision is the upper bound for returned key create revisions; all keys with
@@ -516,7 +559,7 @@ message Compare {
     VERSION = 0;
     CREATE = 1;
     MOD = 2;
-    VALUE= 3;
+    VALUE = 3;
     LEASE = 4;
   }
   // result is logical comparison operation for this comparison.
@@ -639,20 +682,24 @@ message WatchRequest {
   oneof request_union {
     WatchCreateRequest create_request = 1;
     WatchCancelRequest cancel_request = 2;
+    WatchProgressRequest progress_request = 3;
   }
 }
 
 message WatchCreateRequest {
   // key is the key to register for watching.
   bytes key = 1;
+
   // range_end is the end of the range [key, range_end) to watch. If range_end is not given,
   // only the key argument is watched. If range_end is equal to '\0', all keys greater than
   // or equal to the key argument are watched.
   // If the range_end is one bit larger than the given key,
   // then all keys with the prefix (the given key) will be watched.
   bytes range_end = 2;
+
   // start_revision is an optional revision to watch from (inclusive). No start_revision is "now".
   int64 start_revision = 3;
+
   // progress_notify is set so that the etcd server will periodically send a WatchResponse with
   // no events to the new watcher if there are no recent events. It is useful when clients
   // wish to recover a disconnected watcher starting from a recent known revision.
@@ -660,11 +707,12 @@ message WatchCreateRequest {
   bool progress_notify = 4;
 
   enum FilterType {
-  // filter out put event.
-  NOPUT = 0;
-  // filter out delete event.
-  NODELETE = 1;
+    // filter out put event.
+    NOPUT = 0;
+    // filter out delete event.
+    NODELETE = 1;
   }
+
   // filters filter the events at server side before it sends back to the watcher.
   repeated FilterType filters = 5;
 
@@ -678,6 +726,9 @@ message WatchCreateRequest {
   // watchers on the same stream. Creating a watcher with an ID already in
   // use on the stream will cause an error to be returned.
   int64 watch_id = 7;
+
+  // fragment enables splitting large revisions into multiple watch responses.
+  bool fragment = 8;
 }
 
 message WatchCancelRequest {
@@ -685,18 +736,26 @@ message WatchCancelRequest {
   int64 watch_id = 1;
 }
 
+// Requests the a watch stream progress status be sent in the watch response stream as soon as
+// possible.
+message WatchProgressRequest {
+}
+
 message WatchResponse {
   ResponseHeader header = 1;
   // watch_id is the ID of the watcher that corresponds to the response.
   int64 watch_id = 2;
+
   // created is set to true if the response is for a create watch request.
   // The client should record the watch_id and expect to receive events for
   // the created watcher from the same stream.
   // All events sent to the created watcher will attach with the same watch_id.
   bool created = 3;
+
   // canceled is set to true if the response is for a cancel watch request.
   // No further events will be sent to the canceled watcher.
   bool canceled = 4;
+
   // compact_revision is set to the minimum index if a watcher tries to watch
   // at a compacted index.
   //
@@ -705,10 +764,13 @@ message WatchResponse {
   //
   // The client should treat the watcher as canceled and should not try to create any
   // watcher with the same start_revision again.
-  int64 compact_revision  = 5;
+  int64 compact_revision = 5;
 
   // cancel_reason indicates the reason for canceling the watcher.
   string cancel_reason = 6;
+
+  // framgment is true if large watch response was split over multiple responses.
+  bool fragment = 7;
 
   repeated mvccpb.Event events = 11;
 }
@@ -735,6 +797,22 @@ message LeaseRevokeRequest {
 }
 
 message LeaseRevokeResponse {
+  ResponseHeader header = 1;
+}
+
+message LeaseCheckpoint {
+    // ID is the lease ID to checkpoint.
+  int64 ID = 1;
+
+  // Remaining_TTL is the remaining time until expiry of the lease.
+  int64 remaining_TTL = 2;
+}
+
+message LeaseCheckpointRequest {
+  repeated LeaseCheckpoint checkpoints = 1;
+}
+
+message LeaseCheckpointResponse {
   ResponseHeader header = 1;
 }
 
@@ -792,11 +870,15 @@ message Member {
   repeated string peerURLs = 3;
   // clientURLs is the list of URLs the member exposes to clients for communication. If the member is not started, clientURLs will be empty.
   repeated string clientURLs = 4;
+  // isLearner indicates if the member is raft learner.
+  bool isLearner = 5;
 }
 
 message MemberAddRequest {
   // peerURLs is the list of URLs the added member will use to communicate with the cluster.
   repeated string peerURLs = 1;
+  // isLearner indicates if the added member is raft learner.
+  bool isLearner = 2;
 }
 
 message MemberAddResponse {
@@ -832,11 +914,23 @@ message MemberUpdateResponse{
 }
 
 message MemberListRequest {
+  bool linearizable = 1;
 }
 
 message MemberListResponse {
   ResponseHeader header = 1;
   // members is a list of all members associated with the cluster.
+  repeated Member members = 2;
+}
+
+message MemberPromoteRequest {
+  // ID is the member ID of the member to promote.
+  uint64 ID = 1;
+}
+
+message MemberPromoteResponse {
+  ResponseHeader header = 1;
+  // members is a list of all members after promoting the member.
   repeated Member members = 2;
 }
 
@@ -892,6 +986,27 @@ message AlarmResponse {
   repeated AlarmMember alarms = 2;
 }
 
+message DowngradeRequest {
+  enum DowngradeAction {
+    VALIDATE = 0;
+    ENABLE = 1;
+    CANCEL = 2;
+  }
+
+  // action is the kind of downgrade request to issue. The action may
+  // VALIDATE the target version, DOWNGRADE the cluster version,
+  // or CANCEL the current downgrading job.
+  DowngradeAction action = 1;
+  // version is the target version to downgrade.
+  string version = 2;
+}
+
+message DowngradeResponse {
+  ResponseHeader header = 1;
+  // version is the current cluster version.
+  string version = 2;
+}
+
 message StatusRequest {
 }
 
@@ -903,7 +1018,7 @@ message StatusResponse {
   int64 dbSize = 3;
   // leader is the member ID which the responding member believes is the current leader.
   uint64 leader = 4;
-  // raftIndex is the current raft index of the responding member.
+  // raftIndex is the current raft committed index of the responding member.
   uint64 raftIndex = 5;
   // raftTerm is the current raft term of the responding member.
   uint64 raftTerm = 6;
@@ -913,12 +1028,17 @@ message StatusResponse {
   repeated string errors = 8;
   // dbSizeInUse is the size of the backend database logically in use, in bytes, of the responding member.
   int64 dbSizeInUse = 9;
+  // isLearner indicates if the member is raft learner.
+  bool isLearner = 10;
 }
 
 message AuthEnableRequest {
 }
 
 message AuthDisableRequest {
+}
+
+message AuthStatusRequest {
 }
 
 message AuthenticateRequest {
@@ -929,6 +1049,7 @@ message AuthenticateRequest {
 message AuthUserAddRequest {
   string name = 1;
   string password = 2;
+  authpb.UserAddOptions options = 3;
 }
 
 message AuthUserGetRequest {
@@ -987,8 +1108,8 @@ message AuthRoleGrantPermissionRequest {
 
 message AuthRoleRevokePermissionRequest {
   string role = 1;
-  string key = 2;
-  string range_end = 3;
+  bytes key = 2;
+  bytes range_end = 3;
 }
 
 message AuthEnableResponse {
@@ -997,6 +1118,13 @@ message AuthEnableResponse {
 
 message AuthDisableResponse {
   ResponseHeader header = 1;
+}
+
+message AuthStatusResponse {
+  ResponseHeader header = 1;
+  bool enabled = 2;
+  // authRevision is the current revision of auth store
+  uint64 authRevision = 3;
 }
 
 message AuthenticateResponse {

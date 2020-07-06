@@ -18,14 +18,14 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/coreos/etcd/etcdserver/api"
-	"github.com/coreos/etcd/etcdserver/api/v2http/httptypes"
+	"go.etcd.io/etcd/v3/etcdserver/api"
+	"go.etcd.io/etcd/v3/etcdserver/api/v2http/httptypes"
 )
 
-func capabilityHandler(c api.Capability, fn func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
+func authCapabilityHandler(fn func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !api.IsCapabilityEnabled(c) {
-			notCapable(w, r, c)
+		if !api.IsCapabilityEnabled(api.AuthCapability) {
+			notCapable(w, r, api.AuthCapability)
 			return
 		}
 		fn(w, r)
@@ -35,6 +35,7 @@ func capabilityHandler(c api.Capability, fn func(http.ResponseWriter, *http.Requ
 func notCapable(w http.ResponseWriter, r *http.Request, c api.Capability) {
 	herr := httptypes.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Not capable of accessing %s feature during rolling upgrades.", c))
 	if err := herr.WriteTo(w); err != nil {
-		plog.Debugf("error writing HTTPError (%v) to %s", err, r.RemoteAddr)
+		// TODO: the following plog was removed, add the logging back if possible
+		// plog.Debugf("error writing HTTPError (%v) to %s", err, r.RemoteAddr)
 	}
 }

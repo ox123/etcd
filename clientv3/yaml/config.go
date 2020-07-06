@@ -20,10 +20,10 @@ import (
 	"crypto/x509"
 	"io/ioutil"
 
-	"github.com/ghodss/yaml"
+	"sigs.k8s.io/yaml"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/pkg/tlsutil"
+	"go.etcd.io/etcd/v3/clientv3"
+	"go.etcd.io/etcd/v3/pkg/tlsutil"
 )
 
 type yamlConfig struct {
@@ -70,9 +70,6 @@ func NewConfig(fpath string) (*clientv3.Config, error) {
 		}
 	}
 
-	if yc.CAfile != "" && yc.TrustedCAfile == "" {
-		yc.TrustedCAfile = yc.CAfile
-	}
 	if yc.TrustedCAfile != "" {
 		cp, err = tlsutil.NewCertPool([]string{yc.TrustedCAfile})
 		if err != nil {

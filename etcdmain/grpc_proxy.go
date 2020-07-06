@@ -16,8 +16,11 @@ package etcdmain
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"math"
 	"net"
 	"net/http"
@@ -26,35 +29,38 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/clientv3/leasing"
-	"github.com/coreos/etcd/clientv3/namespace"
-	"github.com/coreos/etcd/clientv3/ordering"
-	"github.com/coreos/etcd/etcdserver/api/etcdhttp"
-	"github.com/coreos/etcd/etcdserver/api/v3election/v3electionpb"
-	"github.com/coreos/etcd/etcdserver/api/v3lock/v3lockpb"
-	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	"github.com/coreos/etcd/pkg/debugutil"
-	"github.com/coreos/etcd/pkg/transport"
-	"github.com/coreos/etcd/proxy/grpcproxy"
+	"go.etcd.io/etcd/v3/clientv3"
+	"go.etcd.io/etcd/v3/clientv3/leasing"
+	"go.etcd.io/etcd/v3/clientv3/namespace"
+	"go.etcd.io/etcd/v3/clientv3/ordering"
+	"go.etcd.io/etcd/v3/embed"
+	"go.etcd.io/etcd/v3/etcdserver/api/v3election/v3electionpb"
+	"go.etcd.io/etcd/v3/etcdserver/api/v3lock/v3lockpb"
+	pb "go.etcd.io/etcd/v3/etcdserver/etcdserverpb"
+	"go.etcd.io/etcd/v3/pkg/debugutil"
+	"go.etcd.io/etcd/v3/pkg/logutil"
+	"go.etcd.io/etcd/v3/pkg/transport"
+	"go.etcd.io/etcd/v3/proxy/grpcproxy"
 
-	"github.com/coreos/pkg/capnslog"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/grpclog"
+	"google.golang.org/grpc/keepalive"
 )
 
 var (
-	grpcProxyListenAddr        string
-	grpcProxyMetricsListenAddr string
-	grpcProxyEndpoints         []string
-	grpcProxyDNSCluster        string
-	grpcProxyInsecureDiscovery bool
-	grpcProxyDataDir           string
-	grpcMaxCallSendMsgSize     int
-	grpcMaxCallRecvMsgSize     int
+	grpcProxyListenAddr            string
+	grpcProxyMetricsListenAddr     string
+	grpcProxyEndpoints             []string
+	grpcProxyDNSCluster            string
+	grpcProxyDNSClusterServiceName string
+	grpcProxyInsecureDiscovery     bool
+	grpcProxyDataDir               string
+	grpcMaxCallSendMsgSize         int
+	grpcMaxCallRecvMsgSize         int
 
 	// tls for connecting to etcd
 
@@ -82,6 +88,11 @@ var (
 	grpcProxyEnableOrdering bool
 
 	grpcProxyDebug bool
+
+	// GRPC keep alive related options.
+	grpcKeepAliveMinTime  time.Duration
+	grpcKeepAliveTimeout  time.Duration
+	grpcKeepAliveInterval time.Duration
 )
 
 const defaultGRPCMaxCallSendMsgSize = 1.5 * 1024 * 1024
@@ -109,8 +120,9 @@ func newGRPCProxyStartCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&grpcProxyListenAddr, "listen-addr", "127.0.0.1:23790", "listen address")
-	cmd.Flags().StringVar(&grpcProxyDNSCluster, "discovery-srv", "", "DNS domain used to bootstrap initial cluster")
-	cmd.Flags().StringVar(&grpcProxyMetricsListenAddr, "metrics-addr", "", "listen for /metrics requests on an additional interface")
+	cmd.Flags().StringVar(&grpcProxyDNSCluster, "discovery-srv", "", "domain name to query for SRV records describing cluster endpoints")
+	cmd.Flags().StringVar(&grpcProxyDNSClusterServiceName, "discovery-srv-name", "", "service name to query when using DNS discovery")
+	cmd.Flags().StringVar(&grpcProxyMetricsListenAddr, "metrics-addr", "", "listen for endpoint /metrics requests on an additional interface")
 	cmd.Flags().BoolVar(&grpcProxyInsecureDiscovery, "insecure-discovery", false, "accept insecure SRV records")
 	cmd.Flags().StringSliceVar(&grpcProxyEndpoints, "endpoints", []string{"127.0.0.1:2379"}, "comma separated etcd cluster endpoints")
 	cmd.Flags().StringVar(&grpcProxyAdvertiseClientURL, "advertise-client-url", "127.0.0.1:23790", "advertise address to register (must be reachable by client)")
@@ -121,12 +133,15 @@ func newGRPCProxyStartCommand() *cobra.Command {
 	cmd.Flags().StringVar(&grpcProxyDataDir, "data-dir", "default.proxy", "Data directory for persistent data")
 	cmd.Flags().IntVar(&grpcMaxCallSendMsgSize, "max-send-bytes", defaultGRPCMaxCallSendMsgSize, "message send limits in bytes (default value is 1.5 MiB)")
 	cmd.Flags().IntVar(&grpcMaxCallRecvMsgSize, "max-recv-bytes", math.MaxInt32, "message receive limits in bytes (default value is math.MaxInt32)")
+	cmd.Flags().DurationVar(&grpcKeepAliveMinTime, "grpc-keepalive-min-time", embed.DefaultGRPCKeepAliveMinTime, "Minimum interval duration that a client should wait before pinging proxy.")
+	cmd.Flags().DurationVar(&grpcKeepAliveInterval, "grpc-keepalive-interval", embed.DefaultGRPCKeepAliveInterval, "Frequency duration of server-to-client ping to check if a connection is alive (0 to disable).")
+	cmd.Flags().DurationVar(&grpcKeepAliveTimeout, "grpc-keepalive-timeout", embed.DefaultGRPCKeepAliveTimeout, "Additional duration of wait before closing a non-responsive connection (0 to disable).")
 
 	// client TLS for connecting to server
 	cmd.Flags().StringVar(&grpcProxyCert, "cert", "", "identify secure connections with etcd servers using this TLS certificate file")
 	cmd.Flags().StringVar(&grpcProxyKey, "key", "", "identify secure connections with etcd servers using this TLS key file")
 	cmd.Flags().StringVar(&grpcProxyCA, "cacert", "", "verify certificates of TLS-enabled secure etcd servers using this CA bundle")
-	cmd.Flags().BoolVar(&grpcProxyInsecureSkipTLSVerify, "insecure-skip-tls-verify", false, "skip authentication of etcd server TLS certificates")
+	cmd.Flags().BoolVar(&grpcProxyInsecureSkipTLSVerify, "insecure-skip-tls-verify", false, "skip authentication of etcd server TLS certificates (CAUTION: this option should be enabled only for testing purposes)")
 
 	// client TLS for connecting to proxy
 	cmd.Flags().StringVar(&grpcProxyListenCert, "cert-file", "", "identify secure connections to the proxy using this TLS certificate file")
@@ -147,57 +162,74 @@ func newGRPCProxyStartCommand() *cobra.Command {
 func startGRPCProxy(cmd *cobra.Command, args []string) {
 	checkArgs()
 
-	capnslog.SetGlobalLogLevel(capnslog.INFO)
+	lcfg := logutil.DefaultZapLoggerConfig
 	if grpcProxyDebug {
-		capnslog.SetGlobalLogLevel(capnslog.DEBUG)
+		lcfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
 		grpc.EnableTracing = true
-		// enable info, warning, error
-		grpclog.SetLoggerV2(grpclog.NewLoggerV2(os.Stderr, os.Stderr, os.Stderr))
-	} else {
-		// only discard info
-		grpclog.SetLoggerV2(grpclog.NewLoggerV2(ioutil.Discard, os.Stderr, os.Stderr))
 	}
+
+	lg, err := lcfg.Build()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer lg.Sync()
+
+	var gl grpclog.LoggerV2
+	gl, err = logutil.NewGRPCLoggerV2(lcfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	grpclog.SetLoggerV2(gl)
 
 	tlsinfo := newTLS(grpcProxyListenCA, grpcProxyListenCert, grpcProxyListenKey)
 	if tlsinfo == nil && grpcProxyListenAutoTLS {
 		host := []string{"https://" + grpcProxyListenAddr}
 		dir := filepath.Join(grpcProxyDataDir, "fixtures", "proxy")
-		autoTLS, err := transport.SelfCert(dir, host)
+		autoTLS, err := transport.SelfCert(lg, dir, host)
 		if err != nil {
-			plog.Fatal(err)
+			log.Fatal(err)
 		}
 		tlsinfo = &autoTLS
 	}
 	if tlsinfo != nil {
-		plog.Infof("ServerTLS: %s", tlsinfo)
+		lg.Info("gRPC proxy server TLS", zap.String("tls-info", fmt.Sprintf("%+v", tlsinfo)))
 	}
-	m := mustListenCMux(tlsinfo)
-
+	m := mustListenCMux(lg, tlsinfo)
 	grpcl := m.Match(cmux.HTTP2())
 	defer func() {
 		grpcl.Close()
-		plog.Infof("stopping listening for grpc-proxy client requests on %s", grpcProxyListenAddr)
+		lg.Info("stop listening gRPC proxy client requests", zap.String("address", grpcProxyListenAddr))
 	}()
 
-	client := mustNewClient()
+	client := mustNewClient(lg)
+	httpClient := mustNewHTTPClient(lg)
 
-	srvhttp, httpl := mustHTTPListener(m, tlsinfo, client)
+	srvhttp, httpl := mustHTTPListener(lg, m, tlsinfo, client)
 	errc := make(chan error)
-	go func() { errc <- newGRPCProxyServer(client).Serve(grpcl) }()
+	go func() { errc <- newGRPCProxyServer(lg, client).Serve(grpcl) }()
 	go func() { errc <- srvhttp.Serve(httpl) }()
 	go func() { errc <- m.Serve() }()
 	if len(grpcProxyMetricsListenAddr) > 0 {
-		mhttpl := mustMetricsListener(tlsinfo)
+		mhttpl := mustMetricsListener(lg, tlsinfo)
 		go func() {
 			mux := http.NewServeMux()
-			etcdhttp.HandlePrometheus(mux)
-			grpcproxy.HandleHealth(mux, client)
-			plog.Fatal(http.Serve(mhttpl, mux))
+			grpcproxy.HandleMetrics(mux, httpClient, client.Endpoints())
+			grpcproxy.HandleHealth(lg, mux, client)
+			grpcproxy.HandleProxyMetrics(mux)
+			lg.Info("gRPC proxy server metrics URL serving")
+			herr := http.Serve(mhttpl, mux)
+			if herr != nil {
+				lg.Fatal("gRPC proxy server metrics URL returned", zap.Error(herr))
+			} else {
+				lg.Info("gRPC proxy server metrics URL returned")
+			}
 		}()
 	}
 
+	lg.Info("started gRPC proxy", zap.String("address", grpcProxyListenAddr))
+
 	// grpc-proxy is initialized, ready to serve
-	notifySystemd()
+	notifySystemd(lg)
 
 	fmt.Fprintln(os.Stderr, <-errc)
 	os.Exit(1)
@@ -218,13 +250,13 @@ func checkArgs() {
 	}
 }
 
-func mustNewClient() *clientv3.Client {
-	srvs := discoverEndpoints(grpcProxyDNSCluster, grpcProxyCA, grpcProxyInsecureDiscovery)
+func mustNewClient(lg *zap.Logger) *clientv3.Client {
+	srvs := discoverEndpoints(lg, grpcProxyDNSCluster, grpcProxyCA, grpcProxyInsecureDiscovery, grpcProxyDNSClusterServiceName)
 	eps := srvs.Endpoints
 	if len(eps) == 0 {
 		eps = grpcProxyEndpoints
 	}
-	cfg, err := newClientCfg(eps)
+	cfg, err := newClientCfg(lg, eps)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -241,7 +273,7 @@ func mustNewClient() *clientv3.Client {
 	return client
 }
 
-func newClientCfg(eps []string) (*clientv3.Config, error) {
+func newClientCfg(lg *zap.Logger, eps []string) (*clientv3.Config, error) {
 	// set tls if any one tls option set
 	cfg := clientv3.Config{
 		Endpoints:   eps,
@@ -265,8 +297,11 @@ func newClientCfg(eps []string) (*clientv3.Config, error) {
 			return nil, err
 		}
 		clientTLS.InsecureSkipVerify = grpcProxyInsecureSkipTLSVerify
+		if clientTLS.InsecureSkipVerify {
+			lg.Warn("--insecure-skip-tls-verify was given, this grpc proxy process skips authentication of etcd server TLS certificates. This option should be enabled only for testing purposes.")
+		}
 		cfg.TLS = clientTLS
-		plog.Infof("ClientTLS: %s", tls)
+		lg.Info("gRPC proxy client TLS", zap.String("tls-info", fmt.Sprintf("%+v", tls)))
 	}
 	return &cfg, nil
 }
@@ -275,10 +310,10 @@ func newTLS(ca, cert, key string) *transport.TLSInfo {
 	if ca == "" && cert == "" && key == "" {
 		return nil
 	}
-	return &transport.TLSInfo{CAFile: ca, CertFile: cert, KeyFile: key}
+	return &transport.TLSInfo{TrustedCAFile: ca, CertFile: cert, KeyFile: key, EmptyCN: true}
 }
 
-func mustListenCMux(tlsinfo *transport.TLSInfo) cmux.CMux {
+func mustListenCMux(lg *zap.Logger, tlsinfo *transport.TLSInfo) cmux.CMux {
 	l, err := net.Listen("tcp", grpcProxyListenAddr)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -292,25 +327,25 @@ func mustListenCMux(tlsinfo *transport.TLSInfo) cmux.CMux {
 	if tlsinfo != nil {
 		tlsinfo.CRLFile = grpcProxyListenCRL
 		if l, err = transport.NewTLSListener(l, tlsinfo); err != nil {
-			plog.Fatal(err)
+			lg.Fatal("failed to create TLS listener", zap.Error(err))
 		}
 	}
 
-	plog.Infof("listening for grpc-proxy client requests on %s", grpcProxyListenAddr)
+	lg.Info("listening for gRPC proxy client requests", zap.String("address", grpcProxyListenAddr))
 	return cmux.New(l)
 }
 
-func newGRPCProxyServer(client *clientv3.Client) *grpc.Server {
+func newGRPCProxyServer(lg *zap.Logger, client *clientv3.Client) *grpc.Server {
 	if grpcProxyEnableOrdering {
 		vf := ordering.NewOrderViolationSwitchEndpointClosure(*client)
 		client.KV = ordering.NewKV(client.KV, vf)
-		plog.Infof("waiting for linearized read from cluster to recover ordering")
+		lg.Info("waiting for linearized read from cluster to recover ordering")
 		for {
 			_, err := client.KV.Get(context.TODO(), "_", clientv3.WithKeysOnly())
 			if err == nil {
 				break
 			}
-			plog.Warningf("ordering recovery failed, retrying in 1s (%v)", err)
+			lg.Warn("ordering recovery failed, retrying in 1s", zap.Error(err))
 			time.Sleep(time.Second)
 		}
 	}
@@ -326,22 +361,37 @@ func newGRPCProxyServer(client *clientv3.Client) *grpc.Server {
 	}
 
 	kvp, _ := grpcproxy.NewKvProxy(client)
-	watchp, _ := grpcproxy.NewWatchProxy(client)
+	watchp, _ := grpcproxy.NewWatchProxy(lg, client)
 	if grpcProxyResolverPrefix != "" {
-		grpcproxy.Register(client, grpcProxyResolverPrefix, grpcProxyAdvertiseClientURL, grpcProxyResolverTTL)
+		grpcproxy.Register(lg, client, grpcProxyResolverPrefix, grpcProxyAdvertiseClientURL, grpcProxyResolverTTL)
 	}
-	clusterp, _ := grpcproxy.NewClusterProxy(client, grpcProxyAdvertiseClientURL, grpcProxyResolverPrefix)
+	clusterp, _ := grpcproxy.NewClusterProxy(lg, client, grpcProxyAdvertiseClientURL, grpcProxyResolverPrefix)
 	leasep, _ := grpcproxy.NewLeaseProxy(client)
 	mainp := grpcproxy.NewMaintenanceProxy(client)
 	authp := grpcproxy.NewAuthProxy(client)
 	electionp := grpcproxy.NewElectionProxy(client)
 	lockp := grpcproxy.NewLockProxy(client)
 
-	server := grpc.NewServer(
+	gopts := []grpc.ServerOption{
 		grpc.StreamInterceptor(grpc_prometheus.StreamServerInterceptor),
 		grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor),
 		grpc.MaxConcurrentStreams(math.MaxUint32),
-	)
+	}
+	if grpcKeepAliveMinTime > time.Duration(0) {
+		gopts = append(gopts, grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             grpcKeepAliveMinTime,
+			PermitWithoutStream: false,
+		}))
+	}
+	if grpcKeepAliveInterval > time.Duration(0) ||
+		grpcKeepAliveTimeout > time.Duration(0) {
+		gopts = append(gopts, grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    grpcKeepAliveInterval,
+			Timeout: grpcKeepAliveTimeout,
+		}))
+	}
+
+	server := grpc.NewServer(gopts...)
 
 	pb.RegisterKVServer(server, kvp)
 	pb.RegisterWatchServer(server, watchp)
@@ -352,24 +402,26 @@ func newGRPCProxyServer(client *clientv3.Client) *grpc.Server {
 	v3electionpb.RegisterElectionServer(server, electionp)
 	v3lockpb.RegisterLockServer(server, lockp)
 
-	// set zero values for metrics registered for this grpc server
-	grpc_prometheus.Register(server)
-
 	return server
 }
 
-func mustHTTPListener(m cmux.CMux, tlsinfo *transport.TLSInfo, c *clientv3.Client) (*http.Server, net.Listener) {
+func mustHTTPListener(lg *zap.Logger, m cmux.CMux, tlsinfo *transport.TLSInfo, c *clientv3.Client) (*http.Server, net.Listener) {
+	httpClient := mustNewHTTPClient(lg)
 	httpmux := http.NewServeMux()
 	httpmux.HandleFunc("/", http.NotFound)
-	etcdhttp.HandlePrometheus(httpmux)
-	grpcproxy.HandleHealth(httpmux, c)
+	grpcproxy.HandleMetrics(httpmux, httpClient, c.Endpoints())
+	grpcproxy.HandleHealth(lg, httpmux, c)
+	grpcproxy.HandleProxyMetrics(httpmux)
 	if grpcProxyEnablePprof {
 		for p, h := range debugutil.PProfHandlers() {
 			httpmux.Handle(p, h)
 		}
-		plog.Infof("pprof is enabled under %s", debugutil.HTTPPrefixPProf)
+		lg.Info("gRPC proxy enabled pprof", zap.String("path", debugutil.HTTPPrefixPProf))
 	}
-	srvhttp := &http.Server{Handler: httpmux}
+	srvhttp := &http.Server{
+		Handler:  httpmux,
+		ErrorLog: log.New(ioutil.Discard, "net/http", 0),
+	}
 
 	if tlsinfo == nil {
 		return srvhttp, m.Match(cmux.HTTP1())
@@ -377,13 +429,50 @@ func mustHTTPListener(m cmux.CMux, tlsinfo *transport.TLSInfo, c *clientv3.Clien
 
 	srvTLS, err := tlsinfo.ServerConfig()
 	if err != nil {
-		plog.Fatalf("could not setup TLS (%v)", err)
+		lg.Fatal("failed to set up TLS", zap.Error(err))
 	}
 	srvhttp.TLSConfig = srvTLS
 	return srvhttp, m.Match(cmux.Any())
 }
 
-func mustMetricsListener(tlsinfo *transport.TLSInfo) net.Listener {
+func mustNewHTTPClient(lg *zap.Logger) *http.Client {
+	transport, err := newHTTPTransport(grpcProxyCA, grpcProxyCert, grpcProxyKey)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	return &http.Client{Transport: transport}
+}
+
+func newHTTPTransport(ca, cert, key string) (*http.Transport, error) {
+	tr := &http.Transport{}
+
+	if ca != "" && cert != "" && key != "" {
+		caCert, err := ioutil.ReadFile(ca)
+		if err != nil {
+			return nil, err
+		}
+		keyPair, err := tls.LoadX509KeyPair(cert, key)
+		if err != nil {
+			return nil, err
+		}
+		caPool := x509.NewCertPool()
+		caPool.AppendCertsFromPEM(caCert)
+
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{keyPair},
+			RootCAs:      caPool,
+		}
+		tlsConfig.BuildNameToCertificate()
+		tr.TLSClientConfig = tlsConfig
+	} else if grpcProxyInsecureSkipTLSVerify {
+		tlsConfig := &tls.Config{InsecureSkipVerify: grpcProxyInsecureSkipTLSVerify}
+		tr.TLSClientConfig = tlsConfig
+	}
+	return tr, nil
+}
+
+func mustMetricsListener(lg *zap.Logger, tlsinfo *transport.TLSInfo) net.Listener {
 	murl, err := url.Parse(grpcProxyMetricsListenAddr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cannot parse %q", grpcProxyMetricsListenAddr)
@@ -394,6 +483,6 @@ func mustMetricsListener(tlsinfo *transport.TLSInfo) net.Listener {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	plog.Info("grpc-proxy: listening for metrics on ", murl.String())
+	lg.Info("gRPC proxy listening for metrics", zap.String("address", murl.String()))
 	return ml
 }

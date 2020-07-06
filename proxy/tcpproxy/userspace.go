@@ -22,11 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/pkg/capnslog"
-)
-
-var (
-	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "proxy/tcpproxy")
+	"go.uber.org/zap"
 )
 
 type remote struct {
@@ -61,6 +57,7 @@ func (r *remote) isActive() bool {
 }
 
 type TCPProxy struct {
+	Logger          *zap.Logger
 	Listener        net.Listener
 	Endpoints       []*net.SRV
 	MonitorInterval time.Duration
@@ -86,7 +83,9 @@ func (tp *TCPProxy) Run() error {
 	for _, ep := range tp.Endpoints {
 		eps = append(eps, fmt.Sprintf("%s:%d", ep.Target, ep.Port))
 	}
-	plog.Printf("ready to proxy client requests to %+v", eps)
+	if tp.Logger != nil {
+		tp.Logger.Info("ready to proxy client requests", zap.Strings("endpoints", eps))
+	}
 
 	go tp.runMonitor()
 	for {
@@ -113,7 +112,7 @@ func (tp *TCPProxy) pick() *remote {
 			bestPr = r.srv.Priority
 			w = 0
 			weighted = nil
-			unweighted = []*remote{r}
+			unweighted = nil
 			fallthrough
 		case r.srv.Priority == bestPr:
 			if r.srv.Weight > 0 {
@@ -175,7 +174,9 @@ func (tp *TCPProxy) serve(in net.Conn) {
 			break
 		}
 		remote.inactivate()
-		plog.Warningf("deactivated endpoint [%s] due to %v for %v", remote.addr, err, tp.MonitorInterval)
+		if tp.Logger != nil {
+			tp.Logger.Warn("deactivated endpoint", zap.String("address", remote.addr), zap.Duration("interval", tp.MonitorInterval), zap.Error(err))
+		}
 	}
 
 	if out == nil {
@@ -205,9 +206,13 @@ func (tp *TCPProxy) runMonitor() {
 				}
 				go func(r *remote) {
 					if err := r.tryReactivate(); err != nil {
-						plog.Warningf("failed to activate endpoint [%s] due to %v (stay inactive for another %v)", r.addr, err, tp.MonitorInterval)
+						if tp.Logger != nil {
+							tp.Logger.Warn("failed to activate endpoint (stay inactive for another interval)", zap.String("address", r.addr), zap.Duration("interval", tp.MonitorInterval), zap.Error(err))
+						}
 					} else {
-						plog.Printf("activated %s", r.addr)
+						if tp.Logger != nil {
+							tp.Logger.Info("activated", zap.String("address", r.addr))
+						}
 					}
 				}(rem)
 			}

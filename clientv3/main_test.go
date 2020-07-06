@@ -22,13 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/integration"
-	"github.com/coreos/etcd/internal/auth"
-	"github.com/coreos/etcd/pkg/testutil"
-	"golang.org/x/crypto/bcrypt"
+	"go.etcd.io/etcd/v3/integration"
+	"go.etcd.io/etcd/v3/pkg/testutil"
 )
-
-func init() { auth.BcryptCost = bcrypt.MinCost }
 
 // TestMain sets up an etcd cluster if running the examples.
 func TestMain(m *testing.M) {
